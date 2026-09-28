@@ -15,14 +15,13 @@ export type FormState = {
   };
   experience: {
     productsSold: string;
-    helpedDecideStory: string;
     followupExperience: string;
     followupDetail: string;
     yearsExperience: string;
     vehicleSalesExperience: string;
   };
   interest: { interestVacancy: string; interestTopics: string[]; interestDetail: string };
-  challenge: { q1: string; q2: string; q3: string; q4: string; q5: string };
+  challenge: { q1: string; q2: string; q3: string; q4: string; q5: string; q6: string };
   consent: { privacyAccepted: boolean; futureVacancies: boolean };
 };
 
@@ -40,14 +39,13 @@ export const EMPTY_STATE: FormState = {
   },
   experience: {
     productsSold: "",
-    helpedDecideStory: "",
     followupExperience: "",
     followupDetail: "",
     yearsExperience: "",
     vehicleSalesExperience: "",
   },
   interest: { interestVacancy: "", interestTopics: [], interestDetail: "" },
-  challenge: { q1: "", q2: "", q3: "", q4: "", q5: "" },
+  challenge: { q1: "", q2: "", q3: "", q4: "", q5: "", q6: "" },
   consent: { privacyAccepted: false, futureVacancies: false },
 };
 
@@ -64,9 +62,10 @@ export type StepId =
   | "q3"
   | "q4"
   | "q5"
+  | "q6"
   | "review";
 
-export const STEPS: StepId[] = ["intro", "contact", "preferences", "experience", "interest", "q1", "q2", "q3", "q4", "q5", "review"];
+export const STEPS: StepId[] = ["intro", "contact", "preferences", "experience", "interest", "q1", "q2", "q3", "q4", "q5", "q6", "review"];
 
 /** Grupos visibles en la barra de progreso. */
 export const PROGRESS_GROUPS: { label: string; steps: StepId[] }[] = [
@@ -74,14 +73,14 @@ export const PROGRESS_GROUPS: { label: string; steps: StepId[] }[] = [
   { label: "Preferencias", steps: ["preferences"] },
   { label: "Experiencia", steps: ["experience"] },
   { label: "Interés", steps: ["interest"] },
-  { label: "Desafío", steps: ["q1", "q2", "q3", "q4", "q5"] },
+  { label: "Desafío", steps: ["q1", "q2", "q3", "q4", "q5", "q6"] },
   { label: "Envío", steps: ["review"] },
 ];
 
 /** Paso del formulario donde vive un campo (para llevar a la persona al error). */
 export function stepForErrorPath(path: string): StepId {
   const [section, field] = path.split(".");
-  if (section === "challenge" && field && /^q[1-5]$/.test(field)) return field as StepId;
+  if (section === "challenge" && field && /^q[1-6]$/.test(field)) return field as StepId;
   if (section === "contact" || section === "preferences" || section === "experience" || section === "interest") return section;
   return "review";
 }
@@ -101,7 +100,8 @@ export function toPayloadSection<S extends Section>(state: FormState, section: S
   return out as ApplicationInput[S];
 }
 
-export const STORAGE_KEY = "rmx-postulacion-v1";
+// v2: desafío de 6 respuestas abiertas (no se reutilizan borradores del desafío anterior).
+export const STORAGE_KEY = "rmx-postulacion-v2";
 
 export type Persisted = {
   state: FormState;

@@ -88,6 +88,17 @@ export default function PrivacidadPage() {
           </section>
 
           <section>
+            <h2>Evaluación del desafío</h2>
+            <p className="mt-2">
+              Las respuestas del “Desafío de ventas RiderMex” se califican contra una rúbrica de trabajo para ordenar la
+              revisión. Cuando la evaluación asistida por inteligencia artificial está activa, sólo se envían al proveedor las
+              respuestas del desafío, sin tu nombre, teléfono, correo, zona ni CV. El resultado es orientativo: una persona
+              del equipo lo revisa y decide. No se investigan tus redes sociales ni se consultan fuentes externas sobre ti.
+            </p>
+            <p className="mt-2">Proveedor y condiciones del tratamiento: {v(LEGAL.aiProcessingText)}</p>
+          </section>
+
+          <section>
             <h2>Conservación</h2>
             <p className="mt-2">{v(LEGAL.retentionText)}</p>
           </section>

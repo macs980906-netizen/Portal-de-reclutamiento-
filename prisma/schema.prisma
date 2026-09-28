@@ -32,6 +32,85 @@ model User {
   notes    Note[]
   events   ApplicationEvent[]
   audits   AuditLog[]
+  cyclesClosed   RecruitmentCycle[] @relation("CycleClosedBy")
+  cyclesCreated  RecruitmentCycle[] @relation("CycleCreatedBy")
+  evaluationsReviewed Evaluation[]
+}
+
+/// Convocatoria (ciclo de reclutamiento). La shortlist sólo es definitiva al cerrarla.
+model RecruitmentCycle {
+  id               String    @id @default(cuid())
+  name             String
+  /// OPEN | REVIEW | CLOSED
+  status           String    @default("OPEN")
+  startsAt         DateTime
+  endsAt           DateTime?
+  /// Número objetivo de recomendaciones (inicialmente 5).
+  targetCount      Int       @default(5)
+  /// Umbral mínimo (0–100) para ser recomendada. 70 es un parámetro inicial por validar.
+  threshold        Float     @default(70)
+  /// Versión de rúbrica congelada al crear la convocatoria.
+  rubricVersion    String
+  eligibilityVersion String
+  parentId         String?
+  createdById      String?
+  closedAt         DateTime?
+  closedById       String?
+  /// Instantánea inmutable de la shortlist calculada al cerrar.
+  shortlist        Json?
+  shortlistVersion Int       @default(0)
+  /// Contador de reenvíos del aviso (control de duplicados).
+  noticeSeq        Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  parent        RecruitmentCycle?  @relation("CycleVersions", fields: [parentId], references: [id], onDelete: SetNull)
+  children      RecruitmentCycle[] @relation("CycleVersions")
+  createdBy     User?              @relation("CycleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  closedBy      User?              @relation("CycleClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+  applications  Application[]
+  notifications Notification[]
+
+  @@index([status, createdAt])
+}
+
+/// Evaluación de una postulación con una versión concreta de la rúbrica. Nunca se
+/// recalcula al cambiar de rúbrica: una versión nueva crea una evaluación nueva.
+model Evaluation {
+  id                 String    @id @default(cuid())
+  applicationId      String
+  rubricVersion      String
+  questionSetVersion String
+  /// PENDING | RUNNING | COMPLETED | NEEDS_REVIEW | FAILED
+  status             String    @default("PENDING")
+  /// AI | MANUAL
+  source             String    @default("AI")
+  provider           String?
+  model              String?
+  /// Resultado por dimensión: score 0–4, evidence, rationale, confidence, needs_human_review, review_reason.
+  dimensions         Json?
+  /// Pesos usados (copia congelada) para convertir 0–4 a puntos.
+  weights            Json?
+  total              Float?
+  needsReview        Boolean   @default(false)
+  reviewReasons      Json?
+  /// Resultado original de la IA si una persona lo reemplazó manualmente.
+  aiDimensions       Json?
+  attempts           Int       @default(0)
+  lastError          String?
+  /// SHA-256 de la entrada enviada al proveedor (sin datos personales) para auditoría.
+  inputDigest        String?
+  reviewedById       String?
+  reviewedAt         DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  reviewedBy  User?       @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@unique([applicationId, rubricVersion])
+  @@index([status])
 }
 
 /// Sesiones de panel. Sólo se guarda el hash SHA-256 del token; el token vive en una cookie HttpOnly.
@@ -73,7 +152,8 @@ model Application {
 
   // Paso C — Experiencia
   productsSold       String?
-  helpedDecideStory  String
+  /// Sólo en postulaciones del desafío v1 (en v2 la pregunta 6 cubre esta evidencia).
+  helpedDecideStory  String?
   followupExperience String
   followupDetail     String?
   yearsExperience    String?
@@ -86,13 +166,25 @@ model Application {
   interestDetail  String?
 
   // Paso E — Desafío de ventas
-  challengeAnswers Json
+  challengeAnswers   Json
+  /// Versión del conjunto de preguntas contestado.
+  questionSetVersion String  @default("desafio-2026-09-v1")
+  /// Versión de rúbrica asignada al recibirla (la de su convocatoria).
+  rubricVersion      String?
 
-  // Puntaje orientativo (calculado en servidor)
-  scoreTotal      Float
-  scoreBreakdown  Json
-  scoreIndicators Json
-  scoringVersion  String
+  /// Puntaje orientativo vigente (copia del total de la evaluación final; null = pendiente).
+  scoreTotal      Float?
+  /// Campos del puntaje por reglas del desafío v1 (histórico).
+  scoreBreakdown  Json?
+  scoreIndicators Json?
+  scoringVersion  String?
+
+  // Convocatoria
+  cycleId    String?
+  /// Llegó cuando la convocatoria ya no estaba abierta: no entra a la shortlist cerrada.
+  afterClose Boolean @default(false)
+  /// Se informó a la persona que sus respuestas se evalúan con apoyo de IA.
+  aiEvaluationNotice Boolean @default(false)
 
   // Revisión humana
   status           String    @default("NUEVO")
@@ -115,7 +207,10 @@ model Application {
   notes         Note[]
   events        ApplicationEvent[]
   notifications Notification[]
+  evaluations   Evaluation[]
+  cycle         RecruitmentCycle? @relation(fields: [cycleId], references: [id], onDelete: SetNull)
 
+  @@index([cycleId])
   @@index([createdAt])
   @@index([status])
   @@index([agencyFirst])
@@ -193,7 +288,12 @@ model AuditLog {
 /// Notificaciones al equipo. `dedupeKey` impide duplicar envíos por reintentos.
 model Notification {
   id                String      @id @default(cuid())
-  applicationId     String
+  /// NEW_APPLICATION | SHORTLIST
+  kind              String      @default("NEW_APPLICATION")
+  applicationId     String?
+  cycleId           String?
+  /// Parámetros no sensibles del mensaje (nombre corto, agencia, conteos, enlace).
+  payload           Json?
   dedupeKey         String      @unique
   channel           String
   provider          String
@@ -206,9 +306,11 @@ model Notification {
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
   sentAt            DateTime?
-  application       Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application       Application?      @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  cycle             RecruitmentCycle? @relation(fields: [cycleId], references: [id], onDelete: Cascade)
 
   @@index([status])
+  @@index([kind, cycleId])
 }
 
 /// Contador simple para límites de uso (anti-spam). La clave es un hash, nunca una IP en claro.

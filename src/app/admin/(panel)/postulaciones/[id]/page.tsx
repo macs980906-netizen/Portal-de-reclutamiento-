@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { agencyName } from "@/config/agencies";
 import { PRIORITIES, STATUSES, statusLabel } from "@/config/statuses";
 import { CHALLENGE } from "@/lib/challenge";
-import { DIMENSIONS, SCORE_DISCLAIMER, dimensionLabel } from "@/lib/dimensions";
+import { CHALLENGE_V1, CHALLENGE_V1_VERSION } from "@/lib/challenge-v1";
 import {
   COMMUTE_OPTIONS,
   FOLLOWUP_OPTIONS,
@@ -20,10 +20,8 @@ import { prisma } from "@/server/db";
 import { audit } from "@/server/audit";
 import { NOTIFICATION_STATUS } from "@/server/notifications/service";
 import { StatusBadge } from "../../ui";
+import { EvaluationPanel, LegacyScore } from "./evaluation-panel";
 import { addNoteAction, deleteAction, rateAction, updatePriorityAction, updateStatusAction } from "./actions";
-
-type Breakdown = { id: string; score: number; max: number }[];
-type Indicator = { source: string; text: string; tone: "positive" | "neutral" | "caution" };
 
 const dateFmt = new Intl.DateTimeFormat("es-MX", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Mexico_City" });
 
@@ -32,6 +30,7 @@ const OK_MESSAGES: Record<string, string> = {
   prioridad: "Prioridad actualizada.",
   calificacion: "Calificación guardada.",
   nota: "Nota agregada.",
+  evaluacion: "Evaluación actualizada.",
 };
 
 const EVENT_LABELS: Record<string, string> = {
@@ -40,6 +39,10 @@ const EVENT_LABELS: Record<string, string> = {
   PRIORITY: "Cambio de prioridad",
   RATING: "Calificación humana",
   CV_DOWNLOAD: "Descarga de CV",
+  EVAL_RETRY: "Reintento de evaluación",
+  EVAL_MANUAL_REVIEW: "Enviada a revisión manual",
+  EVAL_CONFIRMED: "Evaluación de IA confirmada por una persona",
+  EVAL_MANUAL: "Evaluación manual",
 };
 
 export default async function ApplicationDetail({
@@ -62,6 +65,8 @@ export default async function ApplicationDetail({
       notes: { include: { author: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
       events: { include: { actor: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 50 },
       notifications: { orderBy: { createdAt: "asc" } },
+      evaluations: { include: { reviewedBy: { select: { name: true } } } },
+      cycle: { select: { id: true, name: true, status: true } },
     },
   });
   if (!app) notFound();
@@ -69,8 +74,8 @@ export default async function ApplicationDetail({
   // Acceso a datos de contacto: queda registrado en auditoría.
   await audit("VIEW_APPLICATION", { actorId: user.id, targetId: app.id });
 
-  const breakdown = app.scoreBreakdown as Breakdown;
-  const indicators = app.scoreIndicators as Indicator[];
+  const isV1 = app.questionSetVersion === CHALLENGE_V1_VERSION;
+  const evaluation = app.rubricVersion ? (app.evaluations.find((e) => e.rubricVersion === app.rubricVersion) ?? null) : null;
   const answers = app.challengeAnswers as Record<string, string>;
   const waNumber = `52${app.phone}`;
 
@@ -105,77 +110,48 @@ export default async function ApplicationDetail({
               </span>
             )}
             {app.possibleDuplicate && <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">Posible duplicado</span>}
+            {app.afterClose && <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">Posterior al cierre</span>}
           </p>
+          {app.cycle && (
+            <p className="mt-1 text-sm">
+              Convocatoria:{" "}
+              <Link href={`/admin/convocatorias/${app.cycle.id}`} className="font-semibold underline">
+                {app.cycle.name}
+              </Link>
+            </p>
+          )}
         </div>
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
         <div className="space-y-6">
-          {/* ---------- Puntaje ---------- */}
-          <section className="a-card p-5" aria-labelledby="score-h">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h2 id="score-h" className="font-bold">
-                Puntaje orientativo
-              </h2>
-              <p className="text-3xl font-bold tabular-nums">
-                {Math.round(app.scoreTotal)}
-                <span className="text-base font-normal text-zinc-500"> / 100</span>
-              </p>
-            </div>
-            <p role="note" className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm font-semibold text-amber-900">
-              {SCORE_DISCLAIMER}
-            </p>
-            <ul className="mt-4 space-y-3">
-              {DIMENSIONS.map((d) => {
-                const b = breakdown.find((x) => x.id === d.id);
-                const pct = b ? Math.round((b.score / b.max) * 100) : 0;
-                return (
-                  <li key={d.id}>
-                    <div className="flex justify-between gap-2 text-sm">
-                      <span>{dimensionLabel(d.id)}</span>
-                      <span className="font-semibold tabular-nums">
-                        {b?.score ?? 0} / {b?.max ?? "—"}
-                      </span>
-                    </div>
-                    <div className="mt-1 h-2 rounded-full bg-zinc-200" aria-hidden="true">
-                      <div className="h-2 rounded-full bg-zinc-900" style={{ width: `${pct}%` }} />
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-            <h3 className="mt-5 text-sm font-bold">Indicadores explicables</h3>
-            <ul className="mt-2 space-y-1.5 text-sm">
-              {indicators.map((i, idx) => (
-                <li key={idx} className="flex gap-2">
-                  <span aria-hidden="true">{i.tone === "positive" ? "✅" : i.tone === "caution" ? "⚠️" : "•"}</span>
-                  <span>
-                    <span className="sr-only">{i.tone === "positive" ? "Señal positiva: " : i.tone === "caution" ? "Precaución: " : ""}</span>
-                    {i.text} <span className="text-zinc-500">({i.source.toUpperCase()})</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-4 text-xs text-zinc-500">
-              Versión de reglas: {app.scoringVersion}. Señal contextual (no suma al puntaje) — ventas de vehículos:{" "}
-              <strong>{optionLabel(VEHICLE_EXPERIENCE_OPTIONS, app.vehicleSalesExperience)}</strong>.
-            </p>
-          </section>
+          {isV1 ? (
+            <LegacyScore app={app} />
+          ) : (
+            <EvaluationPanel
+              applicationId={app.id}
+              evaluation={evaluation}
+              canManage={can(user.role, "evaluations:manage")}
+              vehicleExperience={optionLabel(VEHICLE_EXPERIENCE_OPTIONS, app.vehicleSalesExperience)}
+              hasCv={Boolean(app.cv)}
+            />
+          )}
 
           {/* ---------- Desafío ---------- */}
           <section className="a-card p-5" aria-labelledby="ch-h">
             <h2 id="ch-h" className="font-bold">
               Desafío de ventas · respuestas
             </h2>
+            <p className="text-xs text-zinc-500">Versión de preguntas: {app.questionSetVersion}</p>
             <ol className="mt-3 space-y-4">
-              {CHALLENGE.map((q, idx) => (
+              {(isV1 ? CHALLENGE_V1 : CHALLENGE).map((q, idx) => (
                 <li key={q.id} className="text-sm">
                   <p className="font-semibold">
                     {idx + 1}. {q.title}
                   </p>
                   <p className="text-zinc-600">{q.prompt}</p>
                   <p className="mt-1 whitespace-pre-line rounded-md bg-zinc-50 p-3">
-                    {q.kind === "choice" ? (q.options.find((o) => o.id === answers[q.id])?.text ?? "—") : (answers[q.id] ?? "—")}
+                    {"options" in q ? (q.options.find((o) => o.id === answers[q.id])?.text ?? "—") : (answers[q.id] ?? "—")}
                   </p>
                 </li>
               ))}
@@ -189,7 +165,7 @@ export default async function ApplicationDetail({
             </h2>
             <dl className="mt-3 space-y-3 text-sm">
               <Item label="Productos o servicios que ha vendido" value={app.productsSold} />
-              <Item label="Situación en la que ayudó a decidir" value={app.helpedDecideStory} />
+              {app.helpedDecideStory && <Item label="Situación en la que ayudó a decidir (desafío v1)" value={app.helpedDecideStory} />}
               <Item label="Seguimiento a clientes" value={optionLabel(FOLLOWUP_OPTIONS, app.followupExperience)} />
               <Item label="Cómo da seguimiento" value={app.followupDetail} />
               <Item label="Años de experiencia" value={optionLabel(YEARS_OPTIONS, app.yearsExperience)} />
@@ -246,6 +222,7 @@ export default async function ApplicationDetail({
                     {e.type === "PRIORITY" &&
                       `: ${PRIORITIES.find((p) => String(p.value) === e.fromValue)?.label} → ${PRIORITIES.find((p) => String(p.value) === e.toValue)?.label}`}
                     {e.type === "RATING" && `: ${e.fromValue ?? "—"} → ${e.toValue}/5`}
+                    {(e.type === "EVAL_MANUAL" || e.type === "EVAL_CONFIRMED") && e.toValue && `: ${e.toValue}/100`}
                   </p>
                   {e.reason && <p className="text-zinc-600">Motivo: {e.reason}</p>}
                   <p className="text-xs text-zinc-500">

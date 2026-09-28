@@ -1,8 +1,13 @@
 # Portal de reclutamiento RiderMex · Asesores comerciales
 
 Landing y formulario por pasos para postularse como asesor/a comercial en las agencias RiderMex, con un
-**Desafío de ventas** breve, puntaje orientativo transparente calculado en servidor, carga privada de CV,
-panel privado para el equipo y notificaciones configurables (WhatsApp).
+**Desafío de ventas** de 6 situaciones abiertas evaluado contra una rúbrica versionada (con apoyo de IA
+configurable y revisión humana), **convocatorias** con ranking provisional y **shortlist** de hasta 5
+perfiles recomendados al cerrar, carga privada de CV, panel privado y avisos al equipo (WhatsApp / correo).
+
+> La herramienta **recomienda a quién revisar para entrevista**; no identifica objetivamente “a los
+> mejores vendedores” ni es una prueba validada científicamente. Contactar, entrevistar o contratar es
+> siempre decisión del equipo.
 
 > ⚠️ **No está listo para producción.** Faltan datos legales y comerciales que sólo RiderMex puede
 > aprobar (ver [Bloqueadores de lanzamiento](#bloqueadores-de-lanzamiento)). El build de producción se
@@ -20,8 +25,9 @@ panel privado para el equipo y notificaciones configurables (WhatsApp).
 | Datos | **PostgreSQL** + Prisma 6 (migraciones en `prisma/migrations`) | Esquema reproducible, búsquedas y filtros eficientes. |
 | Auth del panel | Sesiones propias en BD (token aleatorio, cookie HttpOnly, hash SHA-256), bcrypt, bloqueo por intentos | Sin dependencia externa; roles ADMIN / REVIEWER. |
 | CV | Almacenamiento privado `local` (fuera de `public/`) o `s3` (bucket privado) | Nunca hay URL pública; descarga sólo vía `/admin/cv/[id]` autenticado. |
-| Puntaje | Reglas deterministas en servidor (`src/server/scoring/`) | Transparente, auditable, sin IA generativa. |
-| Notificaciones | Servicio desacoplado: `console` (dev), WhatsApp Cloud API, Twilio | Idempotente, con registro de estado y reintentos. |
+| Evaluación | Rúbrica versionada (`src/server/evaluation/`) + Claude (SDK oficial `@anthropic-ai/sdk`, salida estructurada validada) | Evidencia y justificación por dimensión; sin puntajes inventados si falla. |
+| Convocatorias | `RecruitmentCycle` + shortlist como función pura | Ranking provisional, cierre auditable, instantánea inmutable. |
+| Notificaciones | Servicio desacoplado: WhatsApp Cloud API / Twilio, correo SMTP de respaldo, `console` (dev) | Idempotente, con registro de estado y reintentos. |
 
 ### Diseño
 
@@ -48,17 +54,20 @@ src/
     api/applications/route.ts    Recepción de postulaciones (validación, antiabuso, CV)
     api/funnel/route.ts          Contador anónimo de formularios iniciados
     admin/login/                 Acceso al panel
-    admin/(panel)/               Resumen, postulaciones, expediente, notificaciones
+    admin/(panel)/               Resumen, convocatorias, postulaciones, expediente, notificaciones
     admin/cv/[id]/route.ts       Descarga autenticada de CV
     admin/export/route.ts        Exportación CSV (sólo ADMIN, auditada)
   config/                        ← DATOS EDITABLES DE NEGOCIO Y LEGALES
     agencies.ts  business.ts  legal.ts  statuses.ts  launch.ts
-  lib/                           Código compartido (validación, desafío público, permisos)
-  server/                        Sólo servidor (BD, auth, almacenamiento, puntuación, notificaciones)
+  lib/                           Código compartido (validación, desafío público v2 y v1 histórico, permisos)
+  server/                        Sólo servidor (BD, auth, almacenamiento, notificaciones)
+    evaluation/                  Rúbricas versionadas, prompt, proveedor IA, validación, shortlist
+    cycles.ts                    Convocatorias: ranking, cierre, avisos, versiones
   proxy.ts                       Primera barrera de /admin (la validación real es por página/acción)
 prisma/  schema.prisma, migrations/, seed.ts (demo sólo desarrollo)
-scripts/ check-launch, create-admin, retention-purge, retry-notifications
-tests/   pruebas unitarias (vitest)
+scripts/ check-launch, create-admin, retention-purge, retry-notifications, process-evaluations,
+         eval-rubric (casos dorados con el modelo real), smoke-public
+tests/   unitarias (vitest) · tests/integration/ contra PostgreSQL real
 ```
 
 ## Instalación local
@@ -86,6 +95,10 @@ Cuentas demo (sólo si corriste el seed): `admin@demo.local` y `revisor@demo.loc
 | `npm run db:deploy` | Aplica migraciones en producción. |
 | `npm run admin:create -- --email x@y --name "Nombre" --role ADMIN` | Crea/actualiza una cuenta (pide la contraseña). |
 | `npm run notifications:retry` | Reintenta notificaciones pendientes/fallidas (programable en cron). |
+| `npm run evaluations:process` | Evalúa postulaciones pendientes o fallidas (programable en cron cada 5–10 min). |
+| `npm run test:integration` | Pruebas de integración contra una BD de pruebas (`TEST_DATABASE_URL`). |
+| `npm run eval:rubric` | Casos dorados contra el proveedor de IA real (requiere `ANTHROPIC_API_KEY`). |
+| `npm run smoke -- <url>` | Verifica que expedientes, puntajes y CV no sean accesibles sin sesión. |
 | `npm run retention:purge [-- --apply]` | Aplica la política de retención (no hace nada mientras el plazo sea `null`). |
 
 ## Variables de entorno
@@ -102,8 +115,11 @@ Ver `.env.example` (todas documentadas). Resumen:
 | `STORAGE_DRIVER`, `STORAGE_LOCAL_DIR`, `S3_*` | según almacenamiento | Ver abajo. |
 | `CV_MAX_MB` | no | Tamaño máximo del CV (5 MB por defecto). |
 | `NOTIFY_PROVIDER`, `NOTIFY_WHATSAPP_RECIPIENTS` | para notificar | Ver abajo. |
-| `WHATSAPP_CLOUD_*`, `WHATSAPP_TEMPLATE_*` | si usas Meta | |
-| `TWILIO_*` | si usas Twilio | |
+| `WHATSAPP_CLOUD_*`, `WHATSAPP_TEMPLATE_NAME`, `WHATSAPP_SHORTLIST_TEMPLATE_NAME` | si usas Meta | |
+| `TWILIO_*`, `TWILIO_SHORTLIST_CONTENT_SID` | si usas Twilio | |
+| `NOTIFY_EMAIL_RECIPIENTS`, `SMTP_*` | respaldo opcional | Correo sólo para quien no tenga WhatsApp configurado. |
+| `NOTIFY_EACH_APPLICATION` | no | `true` (por defecto): aviso por cada postulación además del de shortlist. |
+| `AI_PROVIDER`, `ANTHROPIC_API_KEY`, `AI_MODEL` | para evaluar con IA | `none` por defecto: evaluaciones pendientes / manuales. |
 
 Ninguna variable lleva prefijo `NEXT_PUBLIC_`: nada de esto llega al navegador.
 
@@ -117,9 +133,16 @@ npm run admin:create -- --email persona@ridermex.mx --name "Nombre" --role REVIE
 
 Roles:
 
-- **REVIEWER**: ve expedientes y contacto (queda auditado), descarga CV, califica (1–5) y agrega notas.
-- **ADMIN**: además cambia estado y prioridad, exporta CSV, elimina expedientes (ARCO) y reintenta
-  notificaciones.
+- **REVIEWER**: ve expedientes, convocatorias y contacto (queda auditado), descarga CV, califica (1–5),
+  agrega notas y gestiona evaluaciones (reintentar, enviar a revisión manual, confirmar o calificar con la
+  rúbrica).
+- **ADMIN**: además abre/cierra convocatorias, ajusta umbral y tamaño de shortlist, cambia estado y
+  prioridad (Invitar a entrevista / Revisar manualmente / No continúa en esta ronda…), reenvía avisos,
+  exporta CSV, elimina expedientes (ARCO) y reintenta notificaciones.
+
+Abraham y Verónica deben tener **cuentas individuales** (no hay código compartido ni autorregistro). Las
+rutas del panel son visibles; su protección depende de sesión y permisos verificados en servidor en cada
+página, acción y descarga.
 
 ## Almacenamiento de CV
 
@@ -133,62 +156,126 @@ Roles:
 Validaciones: extensión (`pdf`, `doc`, `docx`) **y** firma real de bytes, tamaño máximo, nombre de
 almacenamiento aleatorio, descarga siempre como adjunto con `nosniff` y CSP `sandbox`.
 
-## Activar WhatsApp
+## Avisos al equipo (WhatsApp y correo)
 
-El mensaje contiene **sólo**: nombre e inicial del apellido, agencia preferida, puntaje orientativo y el
-enlace al expediente (que exige iniciar sesión). Nunca CV, respuestas, teléfono ni correo.
+Hay dos avisos:
 
-1. Define destinatarios (no los subas al repo):
-   `NOTIFY_WHATSAPP_RECIPIENTS=Abraham|+52155XXXXXXXX,Verónica|+52155XXXXXXXX`
-2. Elige proveedor:
+1. **Nueva candidatura** (si `NOTIFY_EACH_APPLICATION=true`): nombre corto, agencia preferida y enlace
+   al expediente.
+2. **Shortlist lista** (al cerrar una convocatoria, una sola vez por destinatario):
+   > Shortlist RiderMex lista: 5 perfiles recomendados para entrevista. Convocatoria: [nombre]. Revisa
+   > puntajes, evidencia y datos de contacto en el portal: [enlace privado]
+
+Nunca se envían CV, respuestas, teléfonos ni correos de candidatos: los enlaces llevan al panel y exigen
+iniciar sesión.
+
+Configuración (no hay números ni correos en el repositorio):
+
+1. Destinatarios: `NOTIFY_WHATSAPP_RECIPIENTS=Abraham|+52155XXXXXXXX,Verónica|+52155XXXXXXXX`.
+2. Proveedor:
    - **WhatsApp Cloud API (Meta)**: `NOTIFY_PROVIDER=whatsapp_cloud`, `WHATSAPP_CLOUD_TOKEN`,
-     `WHATSAPP_CLOUD_PHONE_NUMBER_ID`, `WHATSAPP_TEMPLATE_NAME`, `WHATSAPP_TEMPLATE_LANG=es_MX`.
-     Los mensajes iniciados por el negocio requieren una **plantilla aprobada** de categoría *Utility*
-     con 4 variables, por ejemplo:
-     > Nueva candidatura: {{1}}. Agencia preferida: {{2}}. Puntaje orientativo: {{3}} (requiere revisión
-     > humana). Expediente: {{4}}
+     `WHATSAPP_CLOUD_PHONE_NUMBER_ID`, y dos **plantillas aprobadas** (categoría *Utility*, `es_MX`):
+     - `WHATSAPP_TEMPLATE_NAME` (nueva candidatura): `Nueva candidatura: {{1}}. Agencia preferida: {{2}}. Expediente: {{3}}`
+     - `WHATSAPP_SHORTLIST_TEMPLATE_NAME`: `Shortlist RiderMex lista: {{1}} para entrevista. Convocatoria: {{2}}. Revisa puntajes, evidencia y datos de contacto en el portal: {{3}}`
    - **Twilio**: `NOTIFY_PROVIDER=twilio`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
-     `TWILIO_WHATSAPP_FROM`, y en producción `TWILIO_CONTENT_SID` (plantilla aprobada, variables 1–4).
-     Sin plantilla se envía texto libre, que sólo funciona en sandbox o dentro de la ventana de 24 h.
-3. Reinicia la app y usa **Panel → Notificaciones → Reintentar** (o `npm run notifications:retry`) para
-   enviar las que quedaron como “Requiere configuración”.
+     `TWILIO_WHATSAPP_FROM`, y `TWILIO_CONTENT_SID` / `TWILIO_SHORTLIST_CONTENT_SID` (variables 1–3).
+     Sin plantilla se envía texto libre (sólo sandbox o ventana de 24 h).
+3. Respaldo opcional por correo: `NOTIFY_EMAIL_RECIPIENTS=Abraham|correo,Verónica|correo` + `SMTP_*`.
+   Sólo se usa para quien no tenga WhatsApp configurado.
+4. Tras configurar: **Panel → Notificaciones → Reintentar** (o `npm run notifications:retry`) convierte
+   los avisos “Pendiente de configuración” en envíos reales.
 
-Comportamiento sin credenciales: cada postulación deja un registro **“Requiere configuración”** visible en
-el panel; no se simula ningún envío. Con `NOTIFY_PROVIDER=console` (sólo desarrollo) el aviso se escribe en
-consola y queda como “Registrada en consola (desarrollo)”, nunca como “Enviada”. Cada notificación tiene
-una clave única por postulación y destinatario, y se “reclama” antes de enviar para evitar duplicados.
-Las postulaciones marcadas como posible duplicado no generan notificación.
+Garantías: cada aviso tiene una clave única por convocatoria/versión/destinatario y se “reclama” antes de
+enviar, así que reintentar el cierre no duplica mensajes. “Reenviar aviso” usa un contador con control de
+concurrencia (un doble clic no genera dos reenvíos) y queda auditado. Se registran proveedor,
+destinatario enmascarado, fecha, estado y error, nunca tokens. `NOTIFY_PROVIDER=console` (desarrollo) sólo
+escribe en consola y se muestra como “Sólo registrada en consola (desarrollo, no enviada)”, nunca como
+enviada. El panel muestra si cada canal está configurado y la fecha del último envío.
 
-## Puntaje orientativo
+## Desafío de ventas y evaluación
 
-Calculado en `src/server/scoring/` (sólo servidor; la clave nunca llega al navegador). Función pura y
-determinista. Pesos (editables en `key.ts`, total 100):
+**Desafío v2** (`src/lib/challenge.ts`, versión `desafio-2026-10-v2`): 6 situaciones abiertas, una por
+pantalla, sin cronómetro, ~5–7 minutos. No es una prueba psicológica ni requiere saber de mecánica o del
+catálogo. La pregunta 6 acepta experiencia informal o un plan hipotético. Los expedientes del desafío v1
+(opción múltiple) se conservan con su puntaje histórico y se muestran como tales.
 
-| Dimensión | Peso | Fuente |
+**Rúbrica v1** (`src/server/evaluation/rubrics/v1.ts`, `rubrica-2026-10-v1`), escala 0–4 por dimensión
+convertida a su peso (total 100):
+
+| Dimensión | Peso | Preguntas |
 | --- | --- | --- |
-| Venta consultiva y descubrimiento | 25 | Ejercicio 1 + pregunta en la respuesta abierta |
-| Manejo de objeciones y honestidad | 20 | Ejercicios 2 y 3 |
-| Escucha, empatía y orientación al cliente | 20 | Ejercicios 1, 3, 4 y respuesta abierta |
-| Seguimiento y criterio comercial | 15 | Ejercicio 4 |
-| Comunicación clara | 10 | Respuesta abierta (extensión razonable, ofrece ayuda) |
-| Aprendizaje e interés | 10 | Ejercicio 2 + interés en sus propias palabras |
+| Descubrimiento de necesidades | 20 | Q1, Q5 |
+| Manejo de objeciones y resolución | 20 | Q3 |
+| Comunicación y orientación al cliente | 15 | Q5, Q1, Q4 |
+| Honestidad, criterio y aprendizaje del producto | 15 | Q2, Q3 |
+| Seguimiento e iniciativa comercial | 15 | Q4 |
+| Calidad de la evidencia conductual aportada | 15 | Q6 |
 
-Principios:
+Anclas: 0 sin respuesta evaluable o contradicción clara · 1 poco desarrollo, presión, engaño o invención ·
+2 razonable pero incompleta · 3 sólida y aplicable · 4 especialmente sólida (criterio, empatía, iniciativa y
+seguimiento con honestidad y respeto). Puntos = calificación/4 × peso (`toPoints`, función pura).
 
-- **Orienta la revisión; no decide.** No hay cortes ni rechazos automáticos. El panel muestra el
-  desglose, los indicadores explicables y la advertencia en cada expediente.
-- “No estoy seguro/a; primero preguntaría al cliente” recibe crédito parcial.
-- La respuesta abierta se evalúa con señales simples (hace una pregunta, recibe cordialmente, ofrece
-  ayuda, extensión razonable). No se califica ortografía, acentos, vocabulario ni estilo; el equipo debe
-  leer la respuesta original.
-- La experiencia vendiendo vehículos se muestra como **señal contextual separada** y no suma puntos.
-- No se usan edad, género, zona, domicilio, escolaridad ni otros datos ajenos al puesto.
-- No es una prueba psicométrica ni está validado científicamente; no debe presentarse como tal.
-- Al modificar puntos o pesos, incrementa `SCORING_VERSION` (cada expediente guarda su versión).
+No suman puntos: experiencia en motos o agencias, marcas, años de experiencia, CV (opcional; su ausencia
+no resta), zona, escolaridad. No hay trivia de producto en esta versión.
+
+### Cómo se evalúa (`src/server/evaluation/service.ts`)
+
+1. Al recibir la postulación se crea una evaluación **Pendiente** con la rúbrica de su convocatoria.
+2. En segundo plano se redactan las respuestas (se quitan nombre, correo, teléfono, enlaces y usuarios) y
+   se envían **sólo las 6 respuestas** con un identificador interno al proveedor. Nunca nombre, teléfono,
+   correo, zona ni CV. No se consulta internet ni redes sociales sobre la persona.
+3. El prompt trata las respuestas como datos no confiables (delimitadas; `<`/`>` neutralizados); pide no
+   premiar longitud, gramática, palabras clave ni estilo, respetar variantes del español, distinguir
+   falta de conocimiento técnico de falta de criterio y no inferir rasgos personales.
+4. La salida estructurada (por dimensión: `score` 0–4, `evidence`, `rationale`, `confidence`,
+   `needs_human_review`, `review_reason`) se valida contra el esquema; además se verifica que la
+   evidencia citada **exista textualmente** en las respuestas. Si no cumple, no se guarda.
+5. Pasa a **Revisión manual** (fuera del ranking automático) si hay confianza baja, evidencia no
+   verificable, respuestas vacías, instrucciones incrustadas o el evaluador lo pide. Una persona puede
+   confirmar el resultado o calificar manualmente con la rúbrica (se conserva el resultado previo de la IA).
+6. Sin clave o con fallo del proveedor: queda **Pendiente** o **Falló** con el motivo visible, reintentable;
+   nunca se fabrica un puntaje. Se registran proveedor, modelo, rúbrica, fecha, intentos, error y un hash de
+   la entrada (sin secretos ni respuestas en logs).
+
+**Proveedor**: `AI_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` (modelo por defecto `claude-opus-5`,
+configurable con `AI_MODEL`). Se usan salidas estructuradas y los *fallbacks* del servidor de Anthropic
+(`fallbacks: "default"`): si el modelo declina una petición, se reintenta en otro modelo y se guarda cuál
+respondió; si todos declinan, la evaluación pasa a revisión manual.
+
+**Versionado**: cada convocatoria congela su rúbrica; cada evaluación guarda rúbrica, versión de preguntas
+y pesos. Para cambiarla, crea `rubrics/v2.ts`, regístrala y cambia `CURRENT_RUBRIC_VERSION`: sólo las
+convocatorias nuevas la usan y nada se recalcula retroactivamente.
+
+## Convocatorias y shortlist (`src/server/cycles.ts`)
+
+- **Panel → Convocatorias**: nombre interno, inicio, fecha límite opcional, recomendaciones objetivo (5) y
+  umbral (70, **parámetro inicial por validar**, no un estándar). Una convocatoria activa a la vez.
+- Abierta: cada postulación se evalúa automáticamente y se ve un **ranking provisional** con el aviso
+  persistente “Ranking provisional — la convocatoria sigue abierta”. No se envía aviso final.
+- **Cerrar y calcular shortlist** (ADMIN): reintenta pendientes; si alguna sigue pendiente o fallida el
+  cierre **se detiene** y lista esas candidaturas con “Reintentar” y “Enviar a revisión manual” (nunca se
+  cuentan como 0 ni se excluyen en silencio). Luego calcula la shortlist, guarda una instantánea inmutable
+  con la rúbrica usada, cambia a “Cerrada” (un solo cierre aunque dos personas pulsen a la vez), envía un
+  aviso por destinatario y registra en auditoría quién cerró, cuándo, versión y estado de los avisos.
+- Reglas (`src/server/evaluation/shortlist.ts`): sólo candidaturas completas y elegibles (6 respuestas
+  contestadas y aviso aceptado); las de revisión manual se muestran aparte; se recomiendan hasta N que
+  alcancen el umbral; si sólo 3 lo alcanzan se recomiendan 3; **empate en el último lugar** → se incluyen
+  todas las empatadas y se avisa para que el equipo decida. No hay desempate por orden de llegada, nombre ni
+  datos personales.
+- Postulaciones que llegan con la convocatoria cerrada (o pasada la fecha límite) quedan marcadas como
+  **posteriores al cierre**; el admin puede **abrir una nueva versión** que las recibe.
+- Acciones por candidatura: Invitar a entrevista · Revisar manualmente · No continúa en esta ronda · nota
+  interna (con registro de quién cambió qué). “Marcar resto como no continúa” sólo con confirmación
+  explícita; nunca se rechaza, borra ni notifica automáticamente a candidatos.
 
 ## Privacidad y seguridad (resumen)
 
 - Minimización: no se piden edad, género, estado civil, foto, domicilio exacto, salud ni antecedentes.
+- Al proveedor de IA sólo van las respuestas del desafío redactadas; se registra en cada expediente si la
+  persona fue informada de la evaluación asistida (`aiEvaluationNotice`) y la versión del aviso aceptado.
+- La autorización se verifica en servidor en cada página, acción de servidor y ruta de descarga (no sólo
+  en la interfaz). La base de datos no está expuesta: se recomienda un usuario de PostgreSQL propio de la
+  app sin privilegios de superusuario y sin acceso de red público. No hay RLS de PostgreSQL.
 - Validación cliente + servidor con esquemas estrictos (sin asignación masiva). Prisma evita inyección SQL;
   React escapa la salida (sin `dangerouslySetInnerHTML`).
 - CSRF: verificación de `Origin` en la API; las Server Actions del panel validan origen; cookie `SameSite`.
@@ -231,11 +318,18 @@ Bloquean producción:
 
 Pendientes (no bloquean el build, pero deben confirmarse):
 
-5. **Horario real del puesto** (mientras falte, el formulario usa una pregunta neutral).
-6. **Condiciones de compensación** (sueldo, comisiones, prestaciones, tipo de contratación). La cifra
+5. **Aviso sobre evaluación con proveedor externo de IA** (bloquea sólo si `AI_PROVIDER` está activo):
+   texto aprobado en `aiProcessingText` y `aiProcessingDisclosed = true` en `src/config/legal.ts`.
+6. **Horario real del puesto** (mientras falte, el formulario usa una pregunta neutral).
+7. **Condiciones de compensación** (sueldo, comisiones, prestaciones, tipo de contratación). La cifra
    “hasta $30,000 MXN por comisiones” está oculta (`incomeClaim.enabled = false`) hasta que se valide.
-7. **Credenciales y plantilla de WhatsApp** y números de Abraham y Verónica (u otras personas responsables).
-8. **Logo oficial** en alta calidad.
+8. **Credenciales y dos plantillas de WhatsApp** (nueva candidatura y shortlist) y números de Abraham y
+   Verónica (u otras personas responsables); correo de respaldo opcional.
+9. **Clave del proveedor de IA** (`ANTHROPIC_API_KEY`) y ejecución de `npm run eval:rubric` con resultado
+   satisfactorio; mientras tanto las evaluaciones quedan pendientes o se califican manualmente.
+10. **Validar el umbral (70) y el tamaño de shortlist (5)** con el equipo tras una primera convocatoria.
+11. **Cuentas individuales** para Abraham y Verónica (`npm run admin:create`).
+12. **Logo oficial** en alta calidad.
 
 ## Despliegue
 
@@ -244,21 +338,27 @@ Pendientes (no bloquean el build, pero deben confirmarse):
 3. `npm ci && npm run db:deploy && npm run build && npm start` (o el equivalente de tu plataforma:
    Vercel, Render, Railway, un VPS con Node, etc.). HTTPS debe terminarse en la plataforma o proxy.
 4. Crea las cuentas del panel con `npm run admin:create`.
-5. Programa `npm run notifications:retry` (cada 10–15 min) y, una vez aprobada la política,
+5. Programa `npm run evaluations:process` (cada 5–10 min), `npm run notifications:retry` (cada 10–15 min) y, una vez aprobada la política,
    `npm run retention:purge -- --apply` (diario).
 6. **Nunca** ejecutes `npm run db:seed` en producción (el script lo impide).
 
 ## Pruebas
 
-`npm test` cubre: puntuación (determinismo, pesos, crédito parcial, sin penalizar ortografía ni a quien
-“está empezando”), validación (teléfono, agencias, consentimiento, campos no previstos, UTM), validación
-real de archivos (ejecutable renombrado, ZIP falso, tamaño), permisos por rol, que ningún componente cliente
-importe código de servidor, contenido mínimo de la notificación, CSV sin fórmulas y bloqueos de producción.
-
-También se verificó de extremo a extremo con navegador (móvil 390 px y escritorio): postulación completa
-con y sin CV, errores de validación accesibles, código de confirmación, `401` sin sesión en CV/exportación,
-`403` a revisión para exportar, descarga de CV como adjunto para usuarios autenticados, cambio de estado,
-notas, calificación y exportación por un administrador.
+- `npm test` (unitarias): shortlist (máximo N, umbral sin relleno, empates, bloqueo por pendientes,
+  revisión manual separada, invariancia al orden con 50 candidaturas), conversión 0–4 → puntos, validación
+  de la salida de IA (esquema, evidencia verificable, confianza baja, instrucciones incrustadas),
+  redacción de datos personales, elegibilidad neutral, validación del formulario, archivos, permisos,
+  protección del enlace del aviso, contenido mínimo de avisos, CSV y bloqueos de producción.
+- `npm run test:integration` (PostgreSQL real, evaluador de prueba determinista inyectado sólo en tests):
+  50 postulaciones guardadas con evaluación o error visible; cierre bloqueado por fallos hasta revisión
+  manual; ranking provisional sin aviso; máximo 5 sobre umbral; sólo 3 → 3 y el aviso dice 3; empate en 5.º
+  lugar; orden de envío sin efecto; CV opcional sin efecto en la evaluación; un aviso por destinatario, sin
+  duplicados en reintentos ni doble clic; “pendiente de configuración” sin credenciales; postulaciones
+  posteriores al cierre y nueva versión; una rúbrica nueva no altera convocatorias anteriores.
+- `npm run eval:rubric` (proveedor real): respuesta sólida sin experiencia en motos ≥ 70; inventar datos o
+  presionar ≤ 1 en honestidad/objeciones/seguimiento; sin acentos/mayúsculas ±10 puntos; instrucciones
+  incrustadas → revisión. **Requiere clave; no se ha ejecutado en este entorno.**
+- `npm run smoke -- <url>`: rutas públicas no exponen expedientes, puntajes ni CV.
 
 ## Dependencias con avisos conocidos
 

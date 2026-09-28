@@ -61,6 +61,25 @@ export function getLaunchItems(env: EnvLike = process.env): LaunchItem[] {
       detail: "Sueldo base, comisiones, prestaciones y tipo de contratación sin confirmar; se muestra un mensaje honesto.",
     });
   }
+  const aiProvider = env.AI_PROVIDER ?? "none";
+  if (aiProvider !== "none" && !(LEGAL.aiProcessingDisclosed && LEGAL.aiProcessingText)) {
+    items.push({
+      id: "ai-notice",
+      level: "blocker",
+      title: "Aviso: evaluación con proveedor externo de IA",
+      detail:
+        "AI_PROVIDER está activo pero el aviso de privacidad aprobado no informa el tratamiento de respuestas por un proveedor externo (aiProcessingText / aiProcessingDisclosed en src/config/legal.ts).",
+    });
+  }
+  if (aiProvider === "none" || !env.ANTHROPIC_API_KEY) {
+    items.push({
+      id: "ai-provider",
+      level: "pending",
+      title: "Evaluación con IA sin configurar",
+      detail:
+        "Las evaluaciones quedan “Pendientes” y el cierre de convocatoria se bloquea hasta evaluarlas o enviarlas a revisión manual (AI_PROVIDER, ANTHROPIC_API_KEY).",
+    });
+  }
   const provider = env.NOTIFY_PROVIDER ?? "console";
   const recipients = (env.NOTIFY_WHATSAPP_RECIPIENTS ?? "").trim();
   const providerReady =
@@ -68,6 +87,17 @@ export function getLaunchItems(env: EnvLike = process.env): LaunchItem[] {
       Boolean(env.WHATSAPP_CLOUD_TOKEN && env.WHATSAPP_CLOUD_PHONE_NUMBER_ID && env.WHATSAPP_TEMPLATE_NAME)) ||
     (provider === "twilio" &&
       Boolean(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_WHATSAPP_FROM));
+  const shortlistTemplate =
+    (provider === "whatsapp_cloud" && env.WHATSAPP_SHORTLIST_TEMPLATE_NAME) ||
+    (provider === "twilio" && env.TWILIO_SHORTLIST_CONTENT_SID);
+  if (providerReady && recipients && !shortlistTemplate) {
+    items.push({
+      id: "shortlist-template",
+      level: "pending",
+      title: "Plantilla de WhatsApp para la shortlist",
+      detail: "Falta la plantilla aprobada del aviso de shortlist (WHATSAPP_SHORTLIST_TEMPLATE_NAME o TWILIO_SHORTLIST_CONTENT_SID).",
+    });
+  }
   if (!providerReady || !recipients) {
     items.push({
       id: "notifications",

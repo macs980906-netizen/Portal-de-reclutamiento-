@@ -4,7 +4,8 @@ import { prisma } from "./db";
 import { applicationCode, hmac, sha256 } from "./crypto";
 import { newStorageKey, storage } from "./storage";
 import type { CvKind } from "./file-validation";
-import { scoreApplication } from "./scoring/score";
+import { cycleForSubmission } from "./cycles";
+import { QUESTION_SET_VERSION } from "@/lib/challenge";
 import { LEGAL } from "@/config/legal";
 import { DEFAULT_STATUS } from "@/config/statuses";
 import type { ApplicationData } from "@/lib/validation";
@@ -21,7 +22,11 @@ export type CreateResult = { id: string; code: string; notify: boolean };
  * enviaron una postulación recientemente, se guarda marcada como posible duplicado
  * (sin avisar a la persona ni notificar de nuevo al equipo).
  */
-export async function createApplication(data: ApplicationData, cv: CvUpload | null): Promise<CreateResult> {
+export async function createApplication(
+  data: ApplicationData,
+  cv: CvUpload | null,
+  opts: { aiEvaluationNotice: boolean } = { aiEvaluationNotice: false },
+): Promise<CreateResult> {
   const existing = await prisma.application.findUnique({
     where: { submissionKey: data.submissionKey },
     select: { id: true, code: true },
@@ -39,11 +44,9 @@ export async function createApplication(data: ApplicationData, cv: CvUpload | nu
     select: { id: true },
   });
 
-  const score = scoreApplication({
-    challenge: data.challenge,
-    interestVacancy: data.interest.interestVacancy,
-    interestDetail: data.interest.interestDetail,
-  });
+  // Convocatoria vigente. Si ya no está abierta, la postulación se guarda marcada como
+  // posterior al cierre y no entra en la shortlist cerrada.
+  const assignment = await cycleForSubmission();
 
   let storageKey: string | null = null;
   if (cv) {
@@ -76,7 +79,6 @@ export async function createApplication(data: ApplicationData, cv: CvUpload | nu
           scheduleTalk: pref.scheduleTalk ?? null,
           scheduleAcknowledged: pref.scheduleAcknowledged ?? null,
           productsSold: exp.productsSold ?? null,
-          helpedDecideStory: exp.helpedDecideStory,
           followupExperience: exp.followupExperience,
           followupDetail: exp.followupDetail ?? null,
           yearsExperience: exp.yearsExperience ?? null,
@@ -85,10 +87,14 @@ export async function createApplication(data: ApplicationData, cv: CvUpload | nu
           interestTopics: interest.interestTopics,
           interestDetail: interest.interestDetail ?? null,
           challengeAnswers: challenge,
-          scoreTotal: score.total,
-          scoreBreakdown: score.breakdown,
-          scoreIndicators: score.indicators,
-          scoringVersion: score.version,
+          questionSetVersion: QUESTION_SET_VERSION,
+          rubricVersion: assignment.rubricVersion,
+          cycleId: assignment.cycleId,
+          afterClose: assignment.afterClose,
+          aiEvaluationNotice: opts.aiEvaluationNotice,
+          evaluations: {
+            create: { rubricVersion: assignment.rubricVersion, questionSetVersion: QUESTION_SET_VERSION, status: "PENDING" },
+          },
           status: DEFAULT_STATUS,
           possibleDuplicate: Boolean(duplicate),
           privacyNoticeVersion: LEGAL.noticeVersion,

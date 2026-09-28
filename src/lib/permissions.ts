@@ -16,10 +16,19 @@ export type Permission =
   | "cv:download"
   | "export:csv"
   | "notifications:manage"
+  | "evaluations:manage"
+  | "cycles:manage"
   | "launch:view";
 
 const MATRIX: Record<Role, readonly Permission[]> = {
-  REVIEWER: ["applications:view", "applications:rate", "applications:note", "cv:download", "launch:view"],
+  REVIEWER: [
+    "applications:view",
+    "applications:rate",
+    "applications:note",
+    "cv:download",
+    "evaluations:manage",
+    "launch:view",
+  ],
   ADMIN: [
     "applications:view",
     "applications:rate",
@@ -30,6 +39,8 @@ const MATRIX: Record<Role, readonly Permission[]> = {
     "cv:download",
     "export:csv",
     "notifications:manage",
+    "evaluations:manage",
+    "cycles:manage",
     "launch:view",
   ],
 };

@@ -17,6 +17,7 @@ export const filtersSchema = z.object({
   availability: z.preprocess(emptyToUndef, z.enum(ids(INTERVIEW_AVAILABILITY_OPTIONS)).optional()),
   from: z.preprocess(emptyToUndef, z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()),
   to: z.preprocess(emptyToUndef, z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()),
+  cycle: z.preprocess(emptyToUndef, z.string().cuid().optional()),
   duplicates: z.preprocess(emptyToUndef, z.enum(["hide", "only"]).optional()),
   sort: z.preprocess(emptyToUndef, z.enum(["recommended", "date", "score", "agency", "status"]).default("date")),
   dir: z.preprocess(emptyToUndef, z.enum(["asc", "desc"]).default("desc")),
@@ -59,6 +60,7 @@ export function buildWhere(f: Filters): Prisma.ApplicationWhereInput {
   if (f.availability) and.push({ interviewAvailability: { has: f.availability } });
   if (f.from) and.push({ createdAt: { gte: new Date(`${f.from}T00:00:00-06:00`) } });
   if (f.to) and.push({ createdAt: { lte: new Date(`${f.to}T23:59:59.999-06:00`) } });
+  if (f.cycle) and.push({ cycleId: f.cycle });
   if (f.duplicates === "hide") and.push({ possibleDuplicate: false });
   if (f.duplicates === "only") and.push({ possibleDuplicate: true });
   return and.length ? { AND: and } : {};
@@ -68,9 +70,10 @@ export function buildOrder(f: Filters): Prisma.ApplicationOrderByWithRelationInp
   const dir = f.dir;
   switch (f.sort) {
     case "recommended":
-      return [{ priority: "desc" }, { scoreTotal: "desc" }, { createdAt: "asc" }];
+      // Sin desempate por orden de llegada: a igual puntaje se ordena por código aleatorio.
+      return [{ priority: "desc" }, { scoreTotal: { sort: "desc", nulls: "last" } }, { code: "asc" }];
     case "score":
-      return [{ scoreTotal: dir }, { createdAt: "desc" }];
+      return [{ scoreTotal: { sort: dir, nulls: "last" } }, { createdAt: "desc" }];
     case "agency":
       return [{ agencyFirst: { sort: dir, nulls: "last" } }, { createdAt: "desc" }];
     case "status":

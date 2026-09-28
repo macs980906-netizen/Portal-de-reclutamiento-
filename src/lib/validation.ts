@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { AGENCY_IDS } from "@/config/agencies";
 import { BUSINESS } from "@/config/business";
-import { CHOICE_QUESTIONS, OPEN_QUESTION } from "./challenge";
+import { CHALLENGE } from "./challenge";
 import {
   COMMUTE_OPTIONS,
   FOLLOWUP_OPTIONS,
@@ -126,7 +126,6 @@ export const preferencesSchema = z
 export const experienceSchema = z
   .object({
     productsSold: optionalText(300),
-    helpedDecideStory: text(15, 1200, "Cuéntanos una situación, aunque sea breve."),
     followupExperience: z.enum(ids(FOLLOWUP_OPTIONS), { errorMap: () => ({ message: "Elige una opción." }) }),
     followupDetail: optionalText(600),
     yearsExperience: z.enum(ids(YEARS_OPTIONS)).optional(),
@@ -145,20 +144,19 @@ export const interestSchema = z
   })
   .strict();
 
-const choice = (qid: string) => {
-  const q = CHOICE_QUESTIONS.find((c) => c.id === qid)!;
-  return z.enum(q.options.map((o) => o.id) as [string, ...string[]], {
-    errorMap: () => ({ message: "Elige la opción que más se parezca a lo que harías." }),
-  });
+const answer = (qid: (typeof CHALLENGE)[number]["id"]) => {
+  const q = CHALLENGE.find((c) => c.id === qid)!;
+  return text(q.minLength, q.maxLength, "Escribe tu respuesta, aunque sea breve.");
 };
 
 export const challengeSchema = z
   .object({
-    q1: choice("q1"),
-    q2: choice("q2"),
-    q3: choice("q3"),
-    q4: choice("q4"),
-    q5: text(OPEN_QUESTION.minLength, OPEN_QUESTION.maxLength, "Escribe cómo iniciarías la conversación."),
+    q1: answer("q1"),
+    q2: answer("q2"),
+    q3: answer("q3"),
+    q4: answer("q4"),
+    q5: answer("q5"),
+    q6: answer("q6"),
   })
   .strict();
 

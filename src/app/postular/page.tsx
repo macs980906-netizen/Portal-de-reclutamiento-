@@ -9,13 +9,15 @@ export const metadata: Metadata = {
   robots: { index: false },
 };
 
+export const dynamic = "force-dynamic";
+
 export default function PostularPage() {
   return (
     <div className="stage min-h-dvh">
       <DevBanner />
       <SiteHeader cta={false} />
       <main>
-        <WizardLoader privacyVersion={LEGAL.noticeVersion} />
+        <WizardLoader privacyVersion={LEGAL.noticeVersion} aiAssisted={(process.env.AI_PROVIDER ?? "none") !== "none"} />
       </main>
     </div>
   );

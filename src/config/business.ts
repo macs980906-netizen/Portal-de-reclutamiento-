@@ -42,7 +42,7 @@ export const BUSINESS: BusinessConfig = {
       "Cifra potencial, no fija ni garantizada. Depende de las condiciones reales de la vacante y de los resultados individuales.",
   },
   contactTimeframe: null,
-  estimatedMinutes: "6 a 9 minutos",
+  estimatedMinutes: "8 a 10 minutos",
 };
 
 export const COMPENSATION_FALLBACK =

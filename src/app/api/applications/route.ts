@@ -6,6 +6,7 @@ import { env } from "@/server/env";
 import { rateLimit } from "@/server/rate-limit";
 import { clientIp, isSameOrigin } from "@/server/request";
 import { notifyNewApplication } from "@/server/notifications/service";
+import { evaluateApplication } from "@/server/evaluation/service";
 import { getLaunchBlockers } from "@/config/launch";
 
 export const runtime = "nodejs";
@@ -79,8 +80,12 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await createApplication(parsed.data, cv);
-    if (result.notify) after(() => notifyNewApplication(result.id));
+    const result = await createApplication(parsed.data, cv, { aiEvaluationNotice: e.AI_PROVIDER !== "none" });
+    // Evaluación y aviso en segundo plano: la persona no espera al proveedor de IA.
+    after(async () => {
+      await evaluateApplication(result.id);
+      if (result.notify) await notifyNewApplication(result.id);
+    });
     return NextResponse.json({ ok: true, code: result.code }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     // No se registran datos de la postulación: sólo el tipo de error.

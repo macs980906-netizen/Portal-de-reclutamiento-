@@ -2,11 +2,11 @@ import Link from "next/link";
 import { AGENCIES } from "@/config/agencies";
 import { getLaunchItems } from "@/config/launch";
 import { STATUSES } from "@/config/statuses";
-import { DIMENSIONS, SCORE_DISCLAIMER } from "@/lib/dimensions";
+import { SCORE_DISCLAIMER } from "@/lib/dimensions";
+import { CURRENT_RUBRIC_VERSION, getRubric } from "@/server/evaluation/rubrics";
+import type { DimensionResult } from "@/server/evaluation/types";
 import { requireUser } from "@/server/auth";
 import { prisma } from "@/server/db";
-
-type Breakdown = { id: string; score: number; max: number }[];
 
 export default async function Dashboard({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   await requireUser();
@@ -19,23 +19,26 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     prisma.application.groupBy({ by: ["agencyFirst"], _count: { _all: true } }),
     prisma.application.groupBy({ by: ["status"], _count: { _all: true } }),
     prisma.funnelDaily.aggregate({ _sum: { started: true } }),
-    prisma.application.findMany({ select: { scoreBreakdown: true }, orderBy: { createdAt: "desc" }, take: 1000 }),
+    prisma.evaluation.findMany({
+      where: { rubricVersion: CURRENT_RUBRIC_VERSION, status: "COMPLETED" },
+      select: { dimensions: true },
+      orderBy: { createdAt: "desc" },
+      take: 1000,
+    }),
     prisma.notification.count({ where: { status: { in: ["FAILED", "NOT_CONFIGURED"] } } }),
   ]);
 
   const started = funnel._sum.started ?? 0;
-  const dimAvg = DIMENSIONS.map((d) => {
+  const rubric = getRubric(CURRENT_RUBRIC_VERSION);
+  const dimAvg = rubric.dimensions.map((d) => {
     let sum = 0;
-    let max = 0;
     for (const r of recent) {
-      const b = (r.scoreBreakdown as Breakdown).find((x) => x.id === d.id);
-      if (b) {
-        sum += b.score;
-        max = b.max;
-      }
+      const x = ((r.dimensions ?? []) as DimensionResult[]).find((y) => y.id === d.id);
+      if (x) sum += (x.score / 4) * d.weight;
     }
-    return { ...d, avg: recent.length ? sum / recent.length : 0, max };
+    return { id: d.id, label: d.label, avg: recent.length ? sum / recent.length : 0, max: d.weight };
   });
+  const activeCycle = await prisma.recruitmentCycle.findFirst({ where: { status: { not: "CLOSED" } }, select: { id: true, name: true, status: true } });
   const launch = getLaunchItems();
 
   return (
@@ -49,6 +52,23 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         <h1 className="text-2xl font-bold">Resumen</h1>
         <p className="mt-1 text-sm text-zinc-600">{SCORE_DISCLAIMER}</p>
       </div>
+
+      {activeCycle ? (
+        <p className="rounded-md border border-zinc-300 bg-white p-3 text-sm">
+          Convocatoria activa:{" "}
+          <Link href={`/admin/convocatorias/${activeCycle.id}`} className="font-semibold underline">
+            {activeCycle.name}
+          </Link>{" "}
+          (ranking provisional).
+        </p>
+      ) : (
+        <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          No hay convocatoria abierta.{" "}
+          <Link href="/admin/convocatorias" className="font-semibold underline">
+            Abrir una
+          </Link>
+        </p>
+      )}
 
       <section aria-label="Indicadores" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Formularios iniciados" value={started} hint="Conteo anónimo por día" />
@@ -69,7 +89,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         </section>
         <section className="a-card p-5">
           <h2 className="font-bold">Promedio por dimensión</h2>
-          <p className="text-sm text-zinc-600">Últimas {recent.length} postulaciones.</p>
+          <p className="text-sm text-zinc-600">
+            Rúbrica {rubric.version} · {recent.length} evaluaciones finalizadas.
+          </p>
           <ul className="mt-4 space-y-3">
             {dimAvg.map((d) => (
               <Bar key={d.id} label={d.label} value={d.avg} max={d.max || 1} display={`${d.avg.toFixed(1)} / ${d.max}`} />

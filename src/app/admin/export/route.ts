@@ -60,7 +60,7 @@ export async function GET(req: Request) {
       r.agencySecond ? agencyName(r.agencySecond) : "",
       r.anyAgency ? "Sí" : "No",
       statusLabel(r.status),
-      String(Math.round(r.scoreTotal)),
+      r.scoreTotal != null ? String(r.scoreTotal) : "",
       r.humanRating ? String(r.humanRating) : "",
     ]),
   );

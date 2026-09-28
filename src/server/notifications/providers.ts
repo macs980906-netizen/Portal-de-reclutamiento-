@@ -1,18 +1,31 @@
 import "server-only";
+import nodemailer from "nodemailer";
 import { env, type Env } from "../env";
-import type { NotificationFacts, Recipient } from "./message";
-import { notificationParams, notificationText } from "./message";
+import {
+  notificationSubject,
+  notificationText,
+  templateParams,
+  type EmailRecipient,
+  type NotificationPayload,
+  type Recipient,
+} from "./message";
 
 export type SendResult =
   | { status: "SENT"; providerMessageId?: string }
   | { status: "LOGGED_LOCALLY" }
   | { status: "FAILED"; error: string };
 
-export interface NotificationProvider {
+export interface WhatsAppProvider {
   id: string;
   /** `true` sólo si hay credenciales suficientes para enviar de verdad. */
   configured: boolean;
-  send(to: Recipient, facts: NotificationFacts): Promise<SendResult>;
+  send(to: Recipient, payload: NotificationPayload): Promise<SendResult>;
+}
+
+export interface EmailProvider {
+  id: string;
+  configured: boolean;
+  send(to: EmailRecipient, payload: NotificationPayload): Promise<SendResult>;
 }
 
 const TIMEOUT_MS = 10_000;
@@ -28,26 +41,28 @@ async function describeError(res: Response): Promise<string> {
   return `HTTP ${res.status}${body ? `: ${body}` : ""}`;
 }
 
-/** Desarrollo local: escribe un aviso mínimo en consola. No cuenta como "enviado". */
-const consoleProvider = (e: Env): NotificationProvider => ({
+/** Desarrollo local: escribe un aviso mínimo en consola. Nunca cuenta como "enviado". */
+const consoleProvider = (e: Env): WhatsAppProvider => ({
   id: "console",
   configured: e.APP_ENV !== "production",
-  async send(to, facts) {
-    console.info(`[notificación simulada → ${to.label} ${to.masked}]\n${notificationText(facts)}`);
+  async send(to, payload) {
+    console.info(`[notificación simulada → ${to.label} ${to.masked}]\n${notificationText(payload)}`);
     return { status: "LOGGED_LOCALLY" };
   },
 });
 
 /**
- * WhatsApp Cloud API (Meta). Los mensajes iniciados por el negocio requieren una
- * plantilla aprobada con 4 variables de cuerpo: {{1}} nombre, {{2}} agencia,
- * {{3}} puntaje, {{4}} enlace. Ver README.
+ * WhatsApp Cloud API (Meta). Los mensajes iniciados por el negocio requieren plantillas
+ * aprobadas: WHATSAPP_TEMPLATE_NAME (nueva candidatura: {{1}} nombre, {{2}} agencia,
+ * {{3}} enlace) y WHATSAPP_SHORTLIST_TEMPLATE_NAME (shortlist: {{1}} perfiles,
+ * {{2}} convocatoria, {{3}} enlace). Ver README.
  */
-const whatsappCloudProvider = (e: Env): NotificationProvider => ({
+const whatsappCloudProvider = (e: Env): WhatsAppProvider => ({
   id: "whatsapp_cloud",
   configured: Boolean(e.WHATSAPP_CLOUD_TOKEN && e.WHATSAPP_CLOUD_PHONE_NUMBER_ID && e.WHATSAPP_TEMPLATE_NAME),
-  async send(to, facts) {
-    const p = notificationParams(facts);
+  async send(to, payload) {
+    const template = payload.kind === "SHORTLIST" ? e.WHATSAPP_SHORTLIST_TEMPLATE_NAME : e.WHATSAPP_TEMPLATE_NAME;
+    if (!template) return { status: "FAILED", error: "Falta la plantilla de WhatsApp para este tipo de aviso." };
     const url = `https://graph.facebook.com/${e.WHATSAPP_CLOUD_API_VERSION}/${e.WHATSAPP_CLOUD_PHONE_NUMBER_ID}/messages`;
     try {
       const res = await fetch(url, {
@@ -58,14 +73,9 @@ const whatsappCloudProvider = (e: Env): NotificationProvider => ({
           to: to.phone.replace("+", ""),
           type: "template",
           template: {
-            name: e.WHATSAPP_TEMPLATE_NAME,
+            name: template,
             language: { code: e.WHATSAPP_TEMPLATE_LANG },
-            components: [
-              {
-                type: "body",
-                parameters: [p.name, p.agency, p.score, p.link].map((text) => ({ type: "text", text })),
-              },
-            ],
+            components: [{ type: "body", parameters: templateParams(payload).map((text) => ({ type: "text", text })) }],
           },
         }),
         signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -80,23 +90,23 @@ const whatsappCloudProvider = (e: Env): NotificationProvider => ({
 });
 
 /**
- * Twilio WhatsApp. Con TWILIO_CONTENT_SID usa una plantilla aprobada (variables 1–4);
- * sin ella envía texto libre, que sólo funciona en sandbox o dentro de la ventana de 24 h.
+ * Twilio WhatsApp. Con plantilla aprobada (TWILIO_CONTENT_SID / TWILIO_SHORTLIST_CONTENT_SID)
+ * usa variables 1–3; sin ella envía texto libre (sólo sandbox o ventana de 24 h).
  */
-const twilioProvider = (e: Env): NotificationProvider => ({
+const twilioProvider = (e: Env): WhatsAppProvider => ({
   id: "twilio",
   configured: Boolean(e.TWILIO_ACCOUNT_SID && e.TWILIO_AUTH_TOKEN && e.TWILIO_WHATSAPP_FROM),
-  async send(to, facts) {
-    const p = notificationParams(facts);
+  async send(to, payload) {
     const form = new URLSearchParams({
       From: e.TWILIO_WHATSAPP_FROM!.startsWith("whatsapp:") ? e.TWILIO_WHATSAPP_FROM! : `whatsapp:${e.TWILIO_WHATSAPP_FROM}`,
       To: `whatsapp:${to.phone}`,
     });
-    if (e.TWILIO_CONTENT_SID) {
-      form.set("ContentSid", e.TWILIO_CONTENT_SID);
-      form.set("ContentVariables", JSON.stringify({ 1: p.name, 2: p.agency, 3: p.score, 4: p.link }));
+    const contentSid = payload.kind === "SHORTLIST" ? e.TWILIO_SHORTLIST_CONTENT_SID : e.TWILIO_CONTENT_SID;
+    if (contentSid) {
+      form.set("ContentSid", contentSid);
+      form.set("ContentVariables", JSON.stringify(Object.fromEntries(templateParams(payload).map((v, i) => [i + 1, v]))));
     } else {
-      form.set("Body", notificationText(facts));
+      form.set("Body", notificationText(payload));
     }
     try {
       const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${e.TWILIO_ACCOUNT_SID}/Messages.json`, {
@@ -117,7 +127,7 @@ const twilioProvider = (e: Env): NotificationProvider => ({
   },
 });
 
-export function getProvider(e: Env = env()): NotificationProvider | null {
+export function getProvider(e: Env = env()): WhatsAppProvider | null {
   switch (e.NOTIFY_PROVIDER) {
     case "whatsapp_cloud":
       return whatsappCloudProvider(e);
@@ -128,4 +138,34 @@ export function getProvider(e: Env = env()): NotificationProvider | null {
     default:
       return null;
   }
+}
+
+/** Correo de respaldo por SMTP (sólo si está configurado). */
+export function getEmailProvider(e: Env = env()): EmailProvider {
+  const configured = Boolean(e.SMTP_HOST && e.SMTP_FROM);
+  return {
+    id: "smtp",
+    configured,
+    async send(to, payload) {
+      if (!configured) return { status: "FAILED", error: "SMTP no configurado." };
+      try {
+        const transport = nodemailer.createTransport({
+          host: e.SMTP_HOST,
+          port: e.SMTP_PORT,
+          secure: e.SMTP_PORT === 465,
+          auth: e.SMTP_USER ? { user: e.SMTP_USER, pass: e.SMTP_PASS } : undefined,
+          connectionTimeout: TIMEOUT_MS,
+        });
+        const info = await transport.sendMail({
+          from: e.SMTP_FROM,
+          to: to.email,
+          subject: notificationSubject(payload),
+          text: notificationText(payload),
+        });
+        return { status: "SENT", providerMessageId: info.messageId };
+      } catch (err) {
+        return { status: "FAILED", error: err instanceof Error ? err.message.slice(0, 300) : "Error SMTP" };
+      }
+    },
+  };
 }

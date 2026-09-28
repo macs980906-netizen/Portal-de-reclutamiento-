@@ -8,6 +8,7 @@ import { requireUser } from "@/server/auth";
 import { prisma } from "@/server/db";
 import { PAGE_SIZE, buildOrder, buildWhere, filtersToQuery, parseFilters, type Filters } from "@/server/admin-queries";
 import { StatusBadge } from "../ui";
+import { EVAL_STATUS } from "@/server/evaluation/service";
 
 const SORTS: { id: Filters["sort"]; label: string }[] = [
   { id: "date", label: "Fecha" },
@@ -46,6 +47,10 @@ export default async function ApplicationsList({ searchParams }: { searchParams:
         agencySecond: true,
         anyAgency: true,
         scoreTotal: true,
+        afterClose: true,
+        cycle: { select: { name: true } },
+        evaluations: { select: { status: true, rubricVersion: true } },
+        rubricVersion: true,
         humanRating: true,
         status: true,
         priority: true,
@@ -170,6 +175,8 @@ export default async function ApplicationsList({ searchParams }: { searchParams:
                       {r.priority > 0 && <span className="rounded bg-red-100 px-1.5 font-semibold text-red-800">Prioridad alta</span>}
                       {r.priority < 0 && <span className="rounded bg-zinc-100 px-1.5">Prioridad baja</span>}
                       {r.possibleDuplicate && <span className="rounded bg-amber-100 px-1.5 text-amber-900">Posible duplicado</span>}
+                      {r.afterClose && <span className="rounded bg-amber-100 px-1.5 text-amber-900">Posterior al cierre</span>}
+                      {r.cycle && <span>{r.cycle.name}</span>}
                     </div>
                   </td>
                   <td className="px-4 py-3">
@@ -177,7 +184,15 @@ export default async function ApplicationsList({ searchParams }: { searchParams:
                     {r.agencySecond && <div className="text-xs text-zinc-500">2ª: {agencyName(r.agencySecond)}</div>}
                     {r.anyAgency && r.agencyFirst && <div className="text-xs text-zinc-500">Abierta a cualquiera</div>}
                   </td>
-                  <td className="px-4 py-3 text-right text-base font-bold tabular-nums">{Math.round(r.scoreTotal)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {r.scoreTotal != null ? (
+                      <span className="text-base font-bold">{r.scoreTotal}</span>
+                    ) : (
+                      <span className="text-xs text-zinc-600">
+                        {EVAL_STATUS[(r.evaluations.find((e) => e.rubricVersion === r.rubricVersion)?.status ?? "PENDING") as keyof typeof EVAL_STATUS] ?? "—"}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-center tabular-nums">{r.humanRating ? `${r.humanRating}/5` : "—"}</td>
                   <td className="px-4 py-3">
                     <StatusBadge status={r.status} label={statusLabel(r.status)} />

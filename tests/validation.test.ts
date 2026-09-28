@@ -5,9 +5,16 @@ const valid = {
   submissionKey: "3f1c2b9e-4d5a-4b6c-8d7e-9f0a1b2c3d4e",
   contact: { firstName: "Ana", lastName: "Pérez", phone: "55 1234 5678" },
   preferences: { anyAgency: false, agencyFirst: "coapa", canCommute: "si", interviewAvailability: ["sabado"], scheduleTalk: "si" },
-  experience: { helpedDecideStory: "Ayudé a un cliente a elegir un plan de celular según su uso.", followupExperience: "empezando" },
+  experience: { followupExperience: "empezando" },
   interest: { interestVacancy: "Quiero aprender a vender", interestTopics: ["empezando"] },
-  challenge: { q1: "q1_b", q2: "q2_c", q3: "q3_d", q4: "q4_c", q5: "Hola, bienvenido, ¿en qué te ayudo?" },
+  challenge: {
+    q1: "Para qué la va a usar y cuánto quiere gastar.",
+    q2: "Le digo que lo confirmo y le respondo hoy.",
+    q3: "Le pregunto su presupuesto y le muestro opciones.",
+    q4: "Le escribo con la ficha y le pregunto cuándo prefiere.",
+    q5: "Hola, bienvenido, ¿en qué te ayudo?",
+    q6: "Ayudé a mi vecina a elegir un plan de celular según su uso y le funcionó.",
+  },
   consent: { privacyAccepted: true, futureVacancies: false },
 };
 
@@ -54,8 +61,12 @@ describe("validación de la postulación", () => {
     expect(applicationSchema.safeParse({ ...valid, consent: { privacyAccepted: true } }).success).toBe(true);
   });
 
-  it("rechaza opciones del desafío inexistentes", () => {
-    expect(applicationSchema.safeParse({ ...valid, challenge: { ...valid.challenge, q1: "q2_c" } }).success).toBe(false);
+  it("exige las 6 respuestas del desafío y rechaza preguntas no previstas", () => {
+    const { q6: _q6, ...five } = valid.challenge;
+    void _q6;
+    expect(applicationSchema.safeParse({ ...valid, challenge: five }).success).toBe(false);
+    expect(applicationSchema.safeParse({ ...valid, challenge: { ...valid.challenge, q1: "ok" } }).success).toBe(false);
+    expect(applicationSchema.safeParse({ ...valid, challenge: { ...valid.challenge, q7: "extra respuesta aquí" } }).success).toBe(false);
   });
 
   it("limpia la atribución: descarta valores extraños y quita la query del referrer", () => {

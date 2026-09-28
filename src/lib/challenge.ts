@@ -1,23 +1,19 @@
 /**
- * "Desafío de ventas RiderMex" — contenido PÚBLICO (se envía al navegador).
+ * "Desafío de ventas RiderMex" v2 — contenido PÚBLICO (se envía al navegador).
  *
- * Aquí sólo viven los textos y los identificadores de opción. La clave de respuestas,
- * los pesos y los indicadores viven en `src/server/scoring/key.ts` (sólo servidor).
+ * Seis situaciones de trabajo con respuesta abierta. No es una prueba psicológica ni
+ * mide científicamente la capacidad de ventas: es un ejercicio práctico que ayuda al
+ * equipo a priorizar la revisión. La rúbrica, los pesos y el prompt de evaluación viven
+ * sólo en el servidor (`src/server/evaluation/rubrics/`).
+ *
+ * Para cambiar preguntas: crear una versión nueva (no editar ésta), porque cada
+ * postulación guarda la versión que contestó.
  */
 
-export const UNSURE_OPTION_TEXT = "No estoy seguro/a; primero le preguntaría al cliente.";
+export const QUESTION_SET_VERSION = "desafio-2026-10-v2";
 
-export type ChoiceQuestion = {
-  id: string;
-  kind: "choice";
-  title: string;
-  prompt: string;
-  options: { id: string; text: string }[];
-};
-
-export type OpenQuestion = {
-  id: string;
-  kind: "open";
+export type ChallengeQuestion = {
+  id: "q1" | "q2" | "q3" | "q4" | "q5" | "q6";
   title: string;
   prompt: string;
   hint: string;
@@ -25,93 +21,63 @@ export type OpenQuestion = {
   maxLength: number;
 };
 
-export type ChallengeQuestion = ChoiceQuestion | OpenQuestion;
-
 export const CHALLENGE: readonly ChallengeQuestion[] = [
   {
     id: "q1",
-    kind: "choice",
     title: "Descubrir la necesidad",
-    prompt: "Un cliente te dice que busca una moto, pero aún no sabe cuál. ¿Qué harías primero?",
-    options: [
-      { id: "q1_a", text: "Le muestro la moto que más se vende en la agencia; casi siempre funciona." },
-      {
-        id: "q1_b",
-        text: "Le pregunto para qué la va a usar, qué presupuesto tiene en mente, si ya ha manejado y qué es lo más importante para él o ella.",
-      },
-      { id: "q1_c", text: "Le enseño la promoción del mes para que la aproveche." },
-      { id: "q1_d", text: "Le doy un catálogo para que lo revise con calma y me busque cuando decida." },
-      { id: "q1_u", text: UNSURE_OPTION_TEXT },
-    ],
+    prompt:
+      "Una persona entra a la agencia y dice que quiere una moto, pero no sabe cuál elegir. ¿Qué le preguntarías antes de recomendarle una?",
+    hint: "Escribe las preguntas que le harías, como se las dirías en persona.",
+    minLength: 15,
+    maxLength: 800,
   },
   {
     id: "q2",
-    kind: "choice",
-    title: "Recomendar sin inventar",
+    title: "Cuando no sabes un dato",
     prompt:
-      "Te preguntan por una característica técnica que no conoces (por ejemplo, el rendimiento de gasolina de un modelo). ¿Qué respondes?",
-    options: [
-      { id: "q2_a", text: "Le doy un dato aproximado para no quedar mal." },
-      { id: "q2_b", text: "Cambio el tema hacia otra característica que sí conozco." },
-      {
-        id: "q2_c",
-        text: "Le digo que no tengo el dato exacto, lo confirmo en la ficha técnica o con un compañero y le respondo.",
-      },
-      { id: "q2_d", text: "Le sugiero que lo busque en internet." },
-      { id: "q2_u", text: UNSURE_OPTION_TEXT },
-    ],
+      "El cliente te pregunta algo específico sobre una moto y no estás seguro de la respuesta. ¿Qué le dirías y qué harías después?",
+    hint: "No necesitas saber de mecánica: nos interesa qué harías tú en ese momento.",
+    minLength: 15,
+    maxLength: 800,
   },
   {
     id: "q3",
-    kind: "choice",
-    title: "Objeción de precio",
-    prompt: "El cliente te dice: “Está más cara de lo que pensaba”. ¿Cómo continúas?",
-    options: [
-      { id: "q3_a", text: "Le digo que seguro le consigo un descuento, aunque todavía no lo haya confirmado." },
-      { id: "q3_b", text: "Le explico que es de muy buena calidad y que vale lo que cuesta." },
-      { id: "q3_c", text: "Le insisto en que la promoción se acaba hoy para que decida rápido." },
-      {
-        id: "q3_d",
-        text: "Le pregunto qué presupuesto tenía pensado y qué es lo más importante para él o ella, y le muestro opciones reales que se ajusten.",
-      },
-      { id: "q3_u", text: UNSURE_OPTION_TEXT },
-    ],
+    title: "Objeción de presupuesto",
+    prompt:
+      "El cliente comenta: “Me gusta, pero se me hace más cara de lo que pensaba”. ¿Cómo continuarías la conversación?",
+    hint: "Cuéntanos qué le dirías o preguntarías.",
+    minLength: 15,
+    maxLength: 800,
   },
   {
     id: "q4",
-    kind: "choice",
     title: "Seguimiento",
-    prompt: "Después de recibir información, el cliente deja de responder tus mensajes. ¿Qué harías?",
-    options: [
-      { id: "q4_a", text: "Le escribo todos los días hasta que me conteste." },
-      { id: "q4_b", text: "No le vuelvo a escribir; si le interesa, regresará." },
-      {
-        id: "q4_c",
-        text: "Le mando un mensaje breve con algo útil (por ejemplo, lo que me pidió) y le pregunto si prefiere que lo contacte más adelante.",
-      },
-      { id: "q4_d", text: "Le digo que sólo queda una unidad para que responda, aunque no sea cierto." },
-      { id: "q4_u", text: UNSURE_OPTION_TEXT },
-    ],
+    prompt:
+      "Le compartiste información a una persona interesada y no responde. ¿Qué harías? Si quieres, escribe un ejemplo breve de mensaje.",
+    hint: "Puedes describir lo que harías o escribir el mensaje tal cual lo enviarías.",
+    minLength: 15,
+    maxLength: 800,
   },
   {
     id: "q5",
-    kind: "open",
-    title: "Tu forma de iniciar",
+    title: "Iniciar la conversación",
     prompt:
-      "En 2 a 4 frases, ¿cómo iniciarías la conversación con alguien que llega a la agencia y te dice: “Sólo estoy viendo”?",
-    hint: "Escríbelo como lo dirías en persona. No hay un guion correcto ni se califica la ortografía.",
-    minLength: 15,
-    maxLength: 700,
+      "Una persona llega y dice: “Sólo estoy viendo”. Escribe lo que le responderías para iniciar una conversación sin presionarla.",
+    hint: "Escríbelo como lo dirías. No calificamos ortografía, acentos ni estilo formal.",
+    minLength: 10,
+    maxLength: 600,
+  },
+  {
+    id: "q6",
+    title: "Tu experiencia ayudando a decidir",
+    prompt:
+      "Cuéntanos brevemente una ocasión en que convenciste, ayudaste o acompañaste a alguien para que tomara una decisión. Puede ser en el trabajo, un negocio propio, un proyecto o una situación cotidiana. ¿Qué hiciste tú y qué pasó?",
+    hint: "Vale cualquier experiencia, formal o informal. Si no tienes un ejemplo, cuéntanos cómo lo resolverías en una situación imaginaria.",
+    minLength: 20,
+    maxLength: 1200,
   },
 ] as const;
 
-export const CHOICE_QUESTIONS = CHALLENGE.filter((q): q is ChoiceQuestion => q.kind === "choice");
-export const OPEN_QUESTION = CHALLENGE.find((q): q is OpenQuestion => q.kind === "open")!;
+export const QUESTION_IDS = CHALLENGE.map((q) => q.id);
 
-export type ChallengeAnswers = {
-  q1: string;
-  q2: string;
-  q3: string;
-  q4: string;
-  q5: string;
-};
+export type ChallengeAnswers = Record<ChallengeQuestion["id"], string>;

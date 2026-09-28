@@ -23,6 +23,14 @@ export type LegalConfig = {
   transfersText: string | null;
   /** Medio por el que se comunican cambios al aviso. */
   changesMechanism: string | null;
+  /**
+   * Texto aprobado que informa que las respuestas del desafío (sin nombre, teléfono,
+   * correo ni CV) se procesan con un proveedor externo de IA para una evaluación
+   * orientativa revisada por personas. Debe nombrar al proveedor/encargado y su finalidad.
+   */
+  aiProcessingText: string | null;
+  /** `true` sólo cuando RiderMex aprobó informar ese tratamiento en el aviso. */
+  aiProcessingDisclosed: boolean;
   /** URL del aviso integral aprobado, si vive fuera de este sitio. */
   fullNoticeUrl: string | null;
   /** Texto aprobado del aviso integral (si se publica en este sitio). */
@@ -42,6 +50,8 @@ export const LEGAL: LegalConfig = {
   retentionText: null,
   transfersText: null,
   changesMechanism: null,
+  aiProcessingText: null,
+  aiProcessingDisclosed: false,
   fullNoticeUrl: null,
   fullNoticeApproved: false,
   noticeVersion: "placeholder-dev-0",

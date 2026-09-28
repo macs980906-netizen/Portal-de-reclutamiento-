@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { csvCell } from "@/lib/csv";
-import { notificationText, parseRecipients } from "@/server/notifications/message";
+import { newApplicationPayload, notificationText, parseRecipients, shortlistPayload } from "@/server/notifications/message";
 import { getLaunchBlockers } from "@/config/launch";
 
 function walk(dir: string): string[] {
@@ -23,26 +23,28 @@ describe("límites de privacidad y seguridad", () => {
   });
 
   it("los módulos con la clave y la BD están marcados como sólo servidor", () => {
-    for (const f of ["scoring/key.ts", "scoring/score.ts", "db.ts", "env.ts", "storage.ts", "auth.ts"]) {
+    for (const f of ["evaluation/provider.ts", "evaluation/service.ts", "evaluation/rubrics/index.ts", "cycles.ts", "db.ts", "env.ts", "storage.ts", "auth.ts"]) {
       const src = readFileSync(path.resolve(__dirname, "../src/server", f), "utf8");
       expect(src).toMatch(/^import "server-only";/);
     }
   });
 
-  it("la notificación no incluye teléfono, correo ni respuestas", () => {
-    const text = notificationText({
-      applicationId: "cabc123",
-      firstName: "Ana",
-      lastName: "Pérez",
-      agency: "Coapa",
-      score: 72.4,
-      appUrl: "https://reclutamiento.example.com",
-    });
+  it("los avisos no incluyen teléfono, correo ni respuestas, y enlazan al panel", () => {
+    const text = notificationText(
+      newApplicationPayload({ applicationId: "cabc123", firstName: "Ana", lastName: "Pérez", agency: "Coapa", appUrl: "https://reclutamiento.example.com" }),
+    );
     expect(text).toContain("Ana P.");
-    expect(text).toContain("72/100");
     expect(text).toContain("https://reclutamiento.example.com/admin/postulaciones/cabc123");
     expect(text).not.toMatch(/\d{10}/);
     expect(text).not.toContain("@");
+
+    const sl = notificationText(
+      shortlistPayload({ cycleId: "ccycle1", cycleName: "Octubre", recommended: 5, tie: false, manualReview: 0, appUrl: "https://reclutamiento.example.com/" }),
+    );
+    expect(sl).toContain("Shortlist RiderMex lista: 5 perfiles recomendados para entrevista.");
+    expect(sl).toContain("Convocatoria: Octubre.");
+    expect(sl).toContain("https://reclutamiento.example.com/admin/convocatorias/ccycle1");
+    expect(sl).not.toMatch(/\d{10}/);
   });
 
   it("interpreta destinatarios de variables de entorno y los enmascara", () => {

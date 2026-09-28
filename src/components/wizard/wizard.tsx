@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AGENCIES, UPCOMING_AGENCY_NOTE, agencyName } from "@/config/agencies";
 import { BUSINESS } from "@/config/business";
-import { CHALLENGE, CHOICE_QUESTIONS, OPEN_QUESTION } from "@/lib/challenge";
+import { CHALLENGE } from "@/lib/challenge";
 import {
   COMMUTE_OPTIONS,
   FOLLOWUP_OPTIONS,
@@ -69,7 +69,7 @@ function initialFromStorage(): Initial {
 }
 
 /** Se renderiza sólo en el navegador (ver `wizard-loader.tsx`), por eso puede leer sessionStorage al iniciar. */
-export function Wizard({ privacyVersion }: { privacyVersion: string }) {
+export function Wizard({ privacyVersion, aiAssisted }: { privacyVersion: string; aiAssisted: boolean }) {
   const router = useRouter();
   const [initial] = useState(initialFromStorage);
   const [state, setState] = useState<FormState>(initial.state);
@@ -122,12 +122,10 @@ export function Wizard({ privacyVersion }: { privacyVersion: string }) {
       const r = STEP_SCHEMAS[current].safeParse(toPayloadSection(state, current));
       return r.success ? {} : prefixed(current, fieldErrors(r.error));
     }
-    if (current === "q5") {
-      const r = STEP_SCHEMAS.challenge.shape.q5.safeParse(state.challenge.q5);
-      return r.success ? {} : { "challenge.q5": r.error.issues[0]?.message ?? "Revisa tu respuesta." };
-    }
     if (current.startsWith("q")) {
-      return state.challenge[current as "q1"] ? {} : { [`challenge.${current}`]: "Elige la opción que más se parezca a lo que harías." };
+      const qid = current as keyof FormState["challenge"];
+      const r = STEP_SCHEMAS.challenge.shape[qid].safeParse(state.challenge[qid]);
+      return r.success ? {} : { [`challenge.${qid}`]: r.error.issues[0]?.message ?? "Revisa tu respuesta." };
     }
     // Revisión: todo el formulario.
     const r = applicationSchema.safeParse(buildPayload());
@@ -469,15 +467,6 @@ export function Wizard({ privacyVersion }: { privacyVersion: string }) {
               error={err("experience.productsSold")}
               maxLength={300}
             />
-            <TextArea
-              name="experience.helpedDecideStory"
-              label="Cuéntanos brevemente una situación en la que ayudaste a alguien a decidirse por una opción"
-              hint="Puede ser en un trabajo, un negocio familiar o con alguien conocido."
-              value={state.experience.helpedDecideStory}
-              onChange={(v) => update("experience", { helpedDecideStory: v })}
-              error={err("experience.helpedDecideStory")}
-              maxLength={1200}
-            />
             <RadioCards
               name="experience.followupExperience"
               legend="¿Qué experiencia tienes dando seguimiento a clientes?"
@@ -594,6 +583,9 @@ export function Wizard({ privacyVersion }: { privacyVersion: string }) {
               />
             </div>
             <p className="text-sm text-mute">
+              {aiAssisted
+                ? "Tus respuestas del desafío se califican con apoyo de un sistema de inteligencia artificial según una rúbrica de trabajo; no se le envían tu nombre, teléfono, correo ni CV. El resultado es orientativo y siempre lo revisa una persona del equipo. "
+                : "Tus respuestas del desafío se califican según una rúbrica de trabajo; el resultado es orientativo y siempre lo revisa una persona del equipo. "}
               Al enviar, el equipo RiderMex revisará tu postulación y, si tu perfil coincide con una vacante, te contactará.
               Enviarla no garantiza una entrevista ni una contratación.
             </p>
@@ -622,7 +614,7 @@ export function Wizard({ privacyVersion }: { privacyVersion: string }) {
             </button>
           ) : (
             <button type="submit" className="btn btn-primary">
-              {step === "intro" ? "Comenzar" : returnToReview ? "Guardar y volver a revisión" : step === "q5" ? "Revisar respuestas" : "Continuar →"}
+              {step === "intro" ? "Comenzar" : returnToReview ? "Guardar y volver a revisión" : step === "q6" ? "Revisar respuestas" : "Continuar →"}
             </button>
           )}
         </div>
@@ -714,37 +706,28 @@ function ChallengeStep({
     <div>
       <p className="kicker">Desafío de ventas RiderMex · Ejercicio {index + 1} de {CHALLENGE.length}</p>
       {index === 0 && (
-        <p className="mt-3 rounded-lg border border-line bg-ink/60 p-4 text-fog">
-          Son situaciones reales de agencia. No hay cronómetro ni es una prueba psicológica: elige lo que harías tú. Si no estás
-          seguro/a, también es válido decirlo.
-        </p>
+        <div className="mt-3 space-y-2 rounded-lg border border-line bg-ink/60 p-4 text-fog">
+          <p>
+            Son 6 situaciones de agencia. Contesta con tus palabras lo que harías tú. No hay cronómetro, no es una prueba
+            psicológica y no necesitas saber de mecánica ni conocer el catálogo: RiderMex capacita en producto.
+          </p>
+          <p className="text-sm text-mute">Toma unos 5 a 7 minutos. No calificamos ortografía, acentos ni estilo formal.</p>
+        </div>
       )}
       <h1 id="step-title" ref={headingRef} tabIndex={-1} className="display mt-4 text-3xl outline-none sm:text-4xl">
         {q.title}
       </h1>
       <div className="mt-6">
-        {q.kind === "choice" ? (
-          <RadioCards
-            name={`challenge.${q.id}`}
-            legend={q.prompt}
-            legendClassName="text-xl font-semibold leading-snug text-white"
-            options={q.options.map((o) => ({ id: o.id, label: o.text }))}
-            value={value}
-            onChange={onChange}
-            error={error}
-          />
-        ) : (
-          <TextArea
-            name={`challenge.${q.id}`}
-            label={<span className="text-xl leading-snug">{q.prompt}</span>}
-            hint={q.hint}
-            value={value}
-            onChange={onChange}
-            error={error}
-            maxLength={q.maxLength}
-            rows={5}
-          />
-        )}
+        <TextArea
+          name={`challenge.${q.id}`}
+          label={<span className="text-xl leading-snug">{q.prompt}</span>}
+          hint={q.hint}
+          value={value}
+          onChange={onChange}
+          error={error}
+          maxLength={q.maxLength}
+          rows={q.id === "q6" ? 7 : 5}
+        />
       </div>
     </div>
   );
@@ -802,8 +785,6 @@ function CvInput({ cv, error, onChange }: { cv: File | null; error?: string; onC
 
 function Review({ state, cv, onEdit }: { state: FormState; cv: File | null; onEdit: (s: StepId) => void }) {
   const { contact: c, preferences: p, experience: x, interest: i, challenge: ch } = state;
-  const choiceText = (qid: string, id: string) =>
-    CHOICE_QUESTIONS.find((q) => q.id === qid)?.options.find((o) => o.id === id)?.text ?? "Sin responder";
   const labels = (opts: readonly { id: string; label: string }[], ids: string[]) =>
     ids.length ? ids.map((id) => optionLabel(opts, id)).join(", ") : "—";
 
@@ -825,7 +806,6 @@ function Review({ state, cv, onEdit }: { state: FormState; cv: File | null; onEd
       </ReviewBlock>
       <ReviewBlock title="Experiencia" onEdit={() => onEdit("experience")}>
         <Row label="Productos o servicios" value={x.productsSold || "—"} />
-        <Row label="Ayudaste a decidir" value={x.helpedDecideStory} />
         <Row label="Seguimiento" value={optionLabel(FOLLOWUP_OPTIONS, x.followupExperience)} />
         <Row label="Años" value={optionLabel(YEARS_OPTIONS, x.yearsExperience)} />
         <Row label="CV" value={cv ? `${cv.name} (${formatBytes(cv.size)})` : "Sin CV"} />
@@ -835,10 +815,9 @@ function Review({ state, cv, onEdit }: { state: FormState; cv: File | null; onEd
         <Row label="Te interesa" value={labels(INTEREST_TOPIC_OPTIONS, i.interestTopics)} />
       </ReviewBlock>
       <ReviewBlock title="Desafío de ventas" onEdit={() => onEdit("q1")}>
-        {CHOICE_QUESTIONS.map((q, idx) => (
-          <Row key={q.id} label={`${idx + 1}. ${q.title}`} value={choiceText(q.id, ch[q.id as "q1"])} />
+        {CHALLENGE.map((q, idx) => (
+          <Row key={q.id} label={`${idx + 1}. ${q.title}`} value={ch[q.id] || "Sin responder"} />
         ))}
-        <Row label={`5. ${OPEN_QUESTION.title}`} value={ch.q5 || "Sin responder"} />
       </ReviewBlock>
     </div>
   );

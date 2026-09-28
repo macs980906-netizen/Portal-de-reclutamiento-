@@ -28,6 +28,24 @@ const schema = z.object({
   TWILIO_AUTH_TOKEN: z.string().optional(),
   TWILIO_WHATSAPP_FROM: z.string().optional(),
   TWILIO_CONTENT_SID: z.string().optional(),
+  TWILIO_SHORTLIST_CONTENT_SID: z.string().optional(),
+  WHATSAPP_SHORTLIST_TEMPLATE_NAME: z.string().optional(),
+  /** Aviso por cada postulación nueva (además del aviso de shortlist al cerrar). */
+  NOTIFY_EACH_APPLICATION: z.enum(["true", "false"]).default("true"),
+
+  // Correo de respaldo (SMTP)
+  NOTIFY_EMAIL_RECIPIENTS: z.string().default(""),
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
+
+  // Evaluación asistida por IA
+  AI_PROVIDER: z.enum(["none", "anthropic"]).default("none"),
+  ANTHROPIC_API_KEY: z.string().optional(),
+  AI_MODEL: z.string().default("claude-opus-5"),
+  AI_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
 });
 
 export type Env = z.infer<typeof schema>;
@@ -48,3 +66,8 @@ export function env(): Env {
 }
 
 export const isProduction = () => env().APP_ENV === "production";
+
+/** Sólo para pruebas: vuelve a leer process.env en la siguiente llamada. */
+export function resetEnvCache() {
+  cached = null;
+}

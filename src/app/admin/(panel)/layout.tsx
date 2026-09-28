@@ -22,6 +22,9 @@ export default async function PanelLayout({ children }: { children: React.ReactN
             <Link href="/admin" className="hover:underline">
               Resumen
             </Link>
+            <Link href="/admin/convocatorias" className="hover:underline">
+              Convocatorias
+            </Link>
             <Link href="/admin/postulaciones" className="hover:underline">
               Postulaciones
             </Link>
