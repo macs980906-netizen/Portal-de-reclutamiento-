@@ -1,0 +1,225 @@
+// Esquema de datos del portal de reclutamiento RiderMex.
+// Migraciones reproducibles: `npm run db:migrate` (desarrollo) / `npm run db:deploy` (producción).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  REVIEWER
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         Role      @default(REVIEWER)
+  active       Boolean   @default(true)
+  failedLogins Int       @default(0)
+  lockedUntil  DateTime?
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sessions Session[]
+  notes    Note[]
+  events   ApplicationEvent[]
+  audits   AuditLog[]
+}
+
+/// Sesiones de panel. Sólo se guarda el hash SHA-256 del token; el token vive en una cookie HttpOnly.
+model Session {
+  id        String   @id
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Application {
+  id            String  @id @default(cuid())
+  /// Código de postulación no secuencial que ve la persona candidata (p. ej. RMX-7K4P-Q9TD).
+  code          String  @unique
+  /// Clave de idempotencia generada en el navegador; evita duplicados por doble envío o reintentos.
+  submissionKey String  @unique
+
+  // Paso A — Contacto
+  firstName String
+  lastName  String
+  phone     String
+  email     String?
+  /// HMAC de teléfono/correo normalizados para detectar duplicados sin exponerlos.
+  phoneHash String
+  emailHash String?
+
+  // Paso B — Preferencias y disponibilidad
+  agencyFirst           String?
+  agencySecond          String?
+  anyAgency             Boolean  @default(false)
+  generalArea           String?
+  canCommute            String
+  interviewAvailability String[]
+  scheduleTalk          String?
+  scheduleAcknowledged  Boolean?
+
+  // Paso C — Experiencia
+  productsSold       String?
+  helpedDecideStory  String
+  followupExperience String
+  followupDetail     String?
+  yearsExperience    String?
+  /// Señal contextual (no suma al puntaje): ¿ha vendido motos/autos o trabajado en agencia?
+  vehicleSalesExperience String?
+
+  // Paso D — Interés
+  interestVacancy String
+  interestTopics  String[]
+  interestDetail  String?
+
+  // Paso E — Desafío de ventas
+  challengeAnswers Json
+
+  // Puntaje orientativo (calculado en servidor)
+  scoreTotal      Float
+  scoreBreakdown  Json
+  scoreIndicators Json
+  scoringVersion  String
+
+  // Revisión humana
+  status           String    @default("NUEVO")
+  priority         Int       @default(0)
+  priorityReason   String?
+  humanRating      Int?
+  reviewedAt       DateTime?
+  possibleDuplicate Boolean  @default(false)
+
+  // Consentimiento (registro de aviso aceptado)
+  privacyNoticeVersion   String
+  privacyAcceptedAt      DateTime
+  futureVacanciesConsent Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cv            CvFile?
+  attribution   Attribution?
+  notes         Note[]
+  events        ApplicationEvent[]
+  notifications Notification[]
+
+  @@index([createdAt])
+  @@index([status])
+  @@index([agencyFirst])
+  @@index([scoreTotal])
+  @@index([phoneHash])
+  @@index([emailHash])
+}
+
+/// CV almacenado en almacenamiento privado. Nunca se sirve desde una URL pública.
+model CvFile {
+  id            String      @id @default(cuid())
+  applicationId String      @unique
+  storageKey    String      @unique
+  originalName  String
+  mimeType      String
+  sizeBytes     Int
+  sha256        String
+  createdAt     DateTime    @default(now())
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
+/// Atribución de campaña, separada de las respuestas.
+model Attribution {
+  applicationId String      @id
+  utmSource     String?
+  utmMedium     String?
+  utmCampaign   String?
+  utmContent    String?
+  utmTerm       String?
+  referrer      String?
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
+model Note {
+  id            String      @id @default(cuid())
+  applicationId String
+  authorId      String?
+  body          String
+  createdAt     DateTime    @default(now())
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  author        User?       @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([applicationId])
+}
+
+/// Registro de cambios por expediente (estado, calificación humana, prioridad, accesos a contacto y CV).
+model ApplicationEvent {
+  id            String      @id @default(cuid())
+  applicationId String
+  actorId       String?
+  type          String
+  fromValue     String?
+  toValue       String?
+  reason        String?
+  createdAt     DateTime    @default(now())
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  actor         User?       @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([applicationId, createdAt])
+}
+
+/// Auditoría general (inicios de sesión, exportaciones, borrados). No guarda respuestas ni documentos.
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  targetId  String?
+  meta      Json?
+  createdAt DateTime @default(now())
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([action, createdAt])
+}
+
+/// Notificaciones al equipo. `dedupeKey` impide duplicar envíos por reintentos.
+model Notification {
+  id                String      @id @default(cuid())
+  applicationId     String
+  dedupeKey         String      @unique
+  channel           String
+  provider          String
+  recipientLabel    String
+  recipientMasked   String
+  status            String
+  attempts          Int         @default(0)
+  lastError         String?
+  providerMessageId String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  sentAt            DateTime?
+  application       Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
+
+/// Contador simple para límites de uso (anti-spam). La clave es un hash, nunca una IP en claro.
+model RateLimitBucket {
+  key         String   @id
+  count       Int
+  windowStart DateTime
+}
+
+/// Embudo agregado sin datos personales: cuántas personas iniciaron el formulario por día.
+model FunnelDaily {
+  day     String @id
+  started Int    @default(0)
+}

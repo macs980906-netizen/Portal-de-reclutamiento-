@@ -1,0 +1,17 @@
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# Variables de entorno: nunca subir secretos
+.env
+.env.*
+!.env.example
+
+# Almacenamiento privado local de CV (nunca versionar)
+storage/
+
+.DS_Store
+npm-debug.log*
