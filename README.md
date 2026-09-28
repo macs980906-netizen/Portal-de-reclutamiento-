@@ -70,6 +70,52 @@ scripts/ check-launch, create-admin, retention-purge, retry-notifications, proce
 tests/   unitarias (vitest) · tests/integration/ contra PostgreSQL real
 ```
 
+## Probar lo que llevamos
+
+### En tu computadora (recomendado para probar)
+
+Necesitas [Node.js 20+](https://nodejs.org) y [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+(o un PostgreSQL propio).
+
+```bash
+git clone https://github.com/macs980906-netizen/Portal-de-reclutamiento-.git
+cd Portal-de-reclutamiento-
+git checkout claude/ridermex-recruitment-portal-b8m23a
+docker compose up -d          # base de datos local
+cp .env.example .env
+npm install
+npm run db:deploy             # crea las tablas
+npm run db:seed               # datos DEMO + cuentas de prueba
+npm run dev
+```
+
+- Landing: http://localhost:3000 · Formulario: http://localhost:3000/postular
+- Panel: http://localhost:3000/admin/login → `admin@demo.local` / `demo-ridermex-2026`
+  (o `revisor@demo.local` para ver el rol de revisión).
+- Para verlo en tu celular dentro de la misma red Wi-Fi: `npm run dev -- -H 0.0.0.0` y abre
+  `http://<IP-de-tu-computadora>:3000`.
+- Sin `ANTHROPIC_API_KEY` las evaluaciones quedan “Pendientes”: puedes calificarlas a mano desde el
+  expediente o enviarlas a revisión manual para probar el cierre de la convocatoria. Con clave, agrega
+  `AI_PROVIDER=anthropic` y `ANTHROPIC_API_KEY=…` al `.env`.
+- Los avisos de WhatsApp sólo se escriben en la consola (no se envía nada) hasta configurar credenciales.
+
+### Preview en línea (para compartir con el equipo)
+
+Usa `APP_ENV=staging` (producción está bloqueada hasta resolver los pendientes legales). Opción sencilla:
+**Railway** (app + PostgreSQL + volumen en un solo proyecto):
+
+1. Nuevo proyecto → *Deploy from GitHub repo* → esta rama. Agrega un servicio **PostgreSQL**.
+2. Variables del servicio web: `DATABASE_URL` (referencia a la de PostgreSQL), `APP_ENV=staging`,
+   `APP_URL=https://<tu-dominio>.up.railway.app`, `HASH_SECRET` (aleatorio, 32+ caracteres),
+   `TRUST_PROXY_HEADERS=true`, `STORAGE_LOCAL_DIR=/data/private`.
+3. Monta un **volumen** en `/data` (para los CV).
+4. Build: `npm run build` · Start: `npm run db:deploy && npm start`.
+5. Crea tu cuenta: `npm run admin:create -- --email tu@correo --name "Tu nombre" --role ADMIN` (desde la
+   consola del servicio). Para datos demo: `npm run db:seed` (sólo en staging).
+
+En Vercel también funciona, pero su sistema de archivos no es persistente: ahí necesitas
+`STORAGE_DRIVER=s3` con un bucket privado (p. ej. Cloudflare R2) y una base externa (p. ej. Neon).
+
 ## Instalación local
 
 Requisitos: Node 20.9+ (probado con 22), PostgreSQL 14+.
