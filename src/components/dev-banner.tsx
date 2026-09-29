@@ -1,11 +1,23 @@
 import Link from "next/link";
 import { getLaunchItems } from "@/config/launch";
+import { privacyConfig } from "@/config/privacy";
 
 /**
  * Aviso inequívoco fuera de producción cuando faltan datos legales o comerciales.
  * (En producción el build y el envío de postulaciones se bloquean; ver `check:launch`.)
  */
 export function DevBanner() {
+  if (process.env.DATA_BACKEND === "sheets") {
+    const privacy = privacyConfig();
+    const missing = [...privacy.missing];
+    if (!process.env.SHEETS_WEBHOOK_URL || !process.env.SHEETS_WEBHOOK_SECRET) missing.push("conexión con Google Sheets");
+    if (!missing.length) return null;
+    return (
+      <div role="note" className="relative z-20 border-b border-yellow-400/60 bg-yellow-300 px-4 py-2 text-center text-sm font-semibold text-black">
+        Registro aún no disponible · Falta configurar: {missing.join(", ")}.
+      </div>
+    );
+  }
   if (process.env.APP_ENV === "production") return null;
   const blockers = getLaunchItems().filter((i) => i.level === "blocker");
   if (!blockers.length) return null;

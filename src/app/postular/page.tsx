@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { LEGAL } from "@/config/legal";
+import { privacyConfig } from "@/config/privacy";
 import { SiteHeader } from "@/components/brand";
 import { DevBanner } from "@/components/dev-banner";
 import { WizardLoader } from "@/components/wizard/wizard-loader";
@@ -17,7 +17,11 @@ export default function PostularPage() {
       <DevBanner />
       <SiteHeader cta={false} />
       <main>
-        <WizardLoader privacyVersion={LEGAL.noticeVersion} aiAssisted={(process.env.AI_PROVIDER ?? "none") !== "none"} />
+        <WizardLoader
+          privacyVersion={privacyConfig().noticeVersion}
+          aiAssisted={(process.env.AI_PROVIDER ?? "none") !== "none"}
+          cvMaxMb={Number(process.env.CV_MAX_MB ?? (process.env.DATA_BACKEND === "sheets" ? 4 : 5))}
+        />
       </main>
     </div>
   );

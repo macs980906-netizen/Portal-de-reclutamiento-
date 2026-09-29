@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
-import { LEGAL, isLegalComplete } from "@/config/legal";
+import { isLegalComplete } from "@/config/legal";
+import { privacyConfig } from "@/config/privacy";
 import { SiteFooter, SiteHeader } from "@/components/brand";
 
 export const metadata: Metadata = { title: "Aviso de privacidad · Reclutamiento RiderMex" };
+export const dynamic = "force-dynamic";
 
 const PENDING = "[PENDIENTE DE APROBACIÓN POR RIDERMEX]";
 
@@ -12,7 +14,8 @@ const PENDING = "[PENDIENTE DE APROBACIÓN POR RIDERMEX]";
  * El texto describe lo que la plataforma realmente hace, pero no sustituye la revisión legal.
  */
 export default function PrivacidadPage() {
-  const complete = isLegalComplete();
+  const LEGAL = privacyConfig();
+  const complete = LEGAL.sheetsMode ? LEGAL.complete : isLegalComplete();
   const v = (value: string | null) => value ?? PENDING;
 
   return (

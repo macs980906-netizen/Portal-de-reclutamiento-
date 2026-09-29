@@ -8,9 +8,14 @@ import { clientIp, isSameOrigin } from "@/server/request";
 import { notifyNewApplication } from "@/server/notifications/service";
 import { evaluateApplication } from "@/server/evaluation/service";
 import { getLaunchBlockers } from "@/config/launch";
+import { privacyConfig } from "@/config/privacy";
+import { appendApplication, sheetsConfigured, writeEvaluation } from "@/server/sheets";
+import { evaluateAnswers } from "@/server/evaluation/run";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// La evaluación con IA corre después de responder (after); en Vercel necesita tiempo extra.
+export const maxDuration = 300;
 
 const MIN_FILL_SECONDS = 20;
 
@@ -21,14 +26,17 @@ export async function POST(req: Request) {
   if (!isSameOrigin(req.headers)) return fail(403, "Solicitud no permitida.");
 
   const e = env();
-  // Salvaguarda en tiempo de ejecución: producción no recibe datos sin aviso legal aprobado.
-  if (e.APP_ENV === "production" && getLaunchBlockers().length) {
+  const sheets = e.DATA_BACKEND === "sheets";
+  // Salvaguarda en tiempo de ejecución: no se reciben datos sin aviso de privacidad completo.
+  if (sheets ? !privacyConfig().complete || !sheetsConfigured() : e.APP_ENV === "production" && getLaunchBlockers().length) {
     return fail(503, "El registro aún no está disponible. Intenta más tarde.");
   }
 
-  const maxBytes = e.CV_MAX_MB * 1024 * 1024;
+  // En Vercel el cuerpo de la petición tiene tope de 4.5 MB: en modo sheets el CV es de hasta 4 MB.
+  const cvMaxMb = sheets ? Math.min(e.CV_MAX_MB, 4) : e.CV_MAX_MB;
+  const maxBytes = cvMaxMb * 1024 * 1024;
   const declared = Number(req.headers.get("content-length") ?? "0");
-  if (declared > maxBytes + 256 * 1024) return fail(413, `El CV supera el máximo de ${e.CV_MAX_MB} MB.`);
+  if (declared > maxBytes + 256 * 1024) return fail(413, `El CV supera el máximo de ${cvMaxMb} MB.`);
 
   const ip = clientIp(req.headers);
   // Sin IP confiable (TRUST_PROXY_HEADERS=false) el límite es global y más holgado,
@@ -72,11 +80,33 @@ export async function POST(req: Request) {
   let cv: CvUpload | null = null;
   const file = form.get("cv");
   if (file instanceof File && file.size > 0) {
-    if (file.size > maxBytes) return fail(413, `El CV supera el máximo de ${e.CV_MAX_MB} MB.`, { cv: `Máximo ${e.CV_MAX_MB} MB.` });
+    if (file.size > maxBytes) return fail(413, `El CV supera el máximo de ${cvMaxMb} MB.`, { cv: `Máximo ${cvMaxMb} MB.` });
     const bytes = new Uint8Array(await file.arrayBuffer());
     const check = checkCv(file.name, bytes, maxBytes);
     if (!check.ok) return fail(422, check.error, { cv: check.error });
     cv = { bytes, kind: check.kind, displayName: safeDisplayName(file.name) };
+  }
+
+  if (sheets) {
+    try {
+      const data = parsed.data;
+      const saved = await appendApplication(data, cv, {
+        aiNotice: e.AI_PROVIDER !== "none",
+        privacyVersion: privacyConfig().noticeVersion,
+      });
+      if (!saved.duplicateSubmission) {
+        // Evaluación en segundo plano; el resultado se escribe en la misma fila del Sheet.
+        after(async () => {
+          const result = await evaluateAnswers(`EV-${saved.code}`, data.challenge, data.contact);
+          const res = await writeEvaluation(saved.code, result);
+          if (!res.ok) console.error("[sheets] no se pudo escribir la evaluación", res.error);
+        });
+      }
+      return NextResponse.json({ ok: true, code: saved.code }, { headers: { "Cache-Control": "no-store" } });
+    } catch (err) {
+      console.error("[postulación] error al guardar en Sheets", err instanceof Error ? err.message.slice(0, 200) : "desconocido");
+      return fail(500, "Tuvimos un problema al guardar tu postulación. Tus respuestas siguen en este dispositivo; intenta de nuevo en unos minutos.");
+    }
   }
 
   try {

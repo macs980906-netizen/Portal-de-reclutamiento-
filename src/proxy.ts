@@ -7,6 +7,8 @@ import { NextResponse, type NextRequest } from "next/server";
  */
 export function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
+  // Modo Google Sheets: no hay panel web; la hoja es el panel.
+  if (process.env.DATA_BACKEND === "sheets") return new NextResponse("No encontrado", { status: 404 });
   const isLogin = pathname === "/admin/login";
   const hasSession = Boolean(req.cookies.get("rmx_session")?.value);
 

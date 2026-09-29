@@ -4,8 +4,16 @@ import { z } from "zod";
 const schema = z.object({
   APP_ENV: z.enum(["development", "staging", "production"]).default("development"),
   APP_URL: z.string().url().default("http://localhost:3000"),
-  DATABASE_URL: z.string().min(1),
-  HASH_SECRET: z.string().min(16, "HASH_SECRET debe tener al menos 16 caracteres"),
+  /**
+   * postgres: portal completo con panel propio (requiere DATABASE_URL).
+   * sheets: modo simple para Vercel; cada postulación se guarda en un Google Sheet.
+   */
+  DATA_BACKEND: z.enum(["postgres", "sheets"]).default("postgres"),
+  DATABASE_URL: z.string().optional(),
+  SHEETS_WEBHOOK_URL: z.string().url().optional(),
+  SHEETS_WEBHOOK_SECRET: z.string().min(24, "SHEETS_WEBHOOK_SECRET debe tener al menos 24 caracteres").optional(),
+  /** En modo sheets, si falta se usa SHEETS_WEBHOOK_SECRET. */
+  HASH_SECRET: z.string().min(16, "HASH_SECRET debe tener al menos 16 caracteres").optional(),
   TRUST_PROXY_HEADERS: z.enum(["true", "false"]).default("false"),
 
   STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),
@@ -60,12 +68,25 @@ export function env(): Env {
       const fields = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
       throw new Error(`Configuración inválida: ${fields}`);
     }
+    if (!parsed.data.HASH_SECRET && !parsed.data.SHEETS_WEBHOOK_SECRET) {
+      throw new Error("Configuración inválida: define HASH_SECRET (o SHEETS_WEBHOOK_SECRET en modo sheets).");
+    }
+    if (parsed.data.DATA_BACKEND === "postgres" && !parsed.data.DATABASE_URL) {
+      throw new Error("Configuración inválida: DATABASE_URL es obligatoria con DATA_BACKEND=postgres.");
+    }
     cached = parsed.data;
   }
   return cached;
 }
 
 export const isProduction = () => env().APP_ENV === "production";
+
+export const isSheetsMode = () => env().DATA_BACKEND === "sheets";
+
+export function hashSecret(): string {
+  const e = env();
+  return (e.HASH_SECRET ?? e.SHEETS_WEBHOOK_SECRET)!;
+}
 
 /** Sólo para pruebas: vuelve a leer process.env en la siguiente llamada. */
 export function resetEnvCache() {

@@ -15,6 +15,15 @@ perfiles recomendados al cerrar, carga privada de CV, panel privado y avisos al 
 
 ---
 
+## ⚡ Publicar rápido: landing en Vercel + Google Sheets
+
+Si quieres lanzar ya sin base de datos ni panel: cada postulación cae en un **Google Sheet**, Claude la
+evalúa automáticamente y una pestaña **Top 5** se ordena sola. Guía paso a paso:
+**[docs/google-sheets.md](docs/google-sheets.md)** (se activa con `DATA_BACKEND=sheets`).
+
+El resto de este README describe el portal completo (PostgreSQL + panel con cuentas, convocatorias y
+avisos por WhatsApp), que sigue disponible con `DATA_BACKEND=postgres` (valor por defecto).
+
 ## Stack y decisiones
 
 | Área | Elección | Por qué |

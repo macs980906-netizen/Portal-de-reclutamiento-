@@ -33,7 +33,6 @@ import {
   toPayloadSection,
 } from "./state";
 
-const CV_MAX_MB = 5;
 const CV_EXTENSIONS = ["pdf", "doc", "docx"];
 
 type Errors = Record<string, string>;
@@ -69,7 +68,15 @@ function initialFromStorage(): Initial {
 }
 
 /** Se renderiza sólo en el navegador (ver `wizard-loader.tsx`), por eso puede leer sessionStorage al iniciar. */
-export function Wizard({ privacyVersion, aiAssisted }: { privacyVersion: string; aiAssisted: boolean }) {
+export function Wizard({
+  privacyVersion,
+  aiAssisted,
+  cvMaxMb,
+}: {
+  privacyVersion: string;
+  aiAssisted: boolean;
+  cvMaxMb: number;
+}) {
   const router = useRouter();
   const [initial] = useState(initialFromStorage);
   const [state, setState] = useState<FormState>(initial.state);
@@ -206,9 +213,9 @@ export function Wizard({ privacyVersion, aiAssisted }: { privacyVersion: string;
       setCvError("Sólo aceptamos CV en PDF, DOC o DOCX.");
       return;
     }
-    if (file.size > CV_MAX_MB * 1024 * 1024) {
+    if (file.size > cvMaxMb * 1024 * 1024) {
       setCv(null);
-      setCvError(`El archivo supera el máximo de ${CV_MAX_MB} MB.`);
+      setCvError(`El archivo supera el máximo de ${cvMaxMb} MB.`);
       return;
     }
     setCv(file);
@@ -504,7 +511,7 @@ export function Wizard({ privacyVersion, aiAssisted }: { privacyVersion: string;
               onChange={(v) => update("experience", { vehicleSalesExperience: v })}
               columns={2}
             />
-            <CvInput cv={cv} error={cvError} onChange={onCvChange} />
+            <CvInput cv={cv} error={cvError} onChange={onCvChange} maxMb={cvMaxMb} />
           </StepShell>
         )}
 
@@ -733,7 +740,7 @@ function ChallengeStep({
   );
 }
 
-function CvInput({ cv, error, onChange }: { cv: File | null; error?: string; onChange: (f: File | null) => void }) {
+function CvInput({ cv, error, onChange, maxMb }: { cv: File | null; error?: string; onChange: (f: File | null) => void; maxMb: number }) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div data-field="cv">
@@ -741,7 +748,7 @@ function CvInput({ cv, error, onChange }: { cv: File | null; error?: string; onC
         CV <span className="ml-1 text-sm font-normal text-mute">(opcional)</span>
       </label>
       <p id="cv-hint" className="field-hint mt-1">
-        PDF, DOC o DOCX de hasta {CV_MAX_MB} MB. Puedes terminar tu registro sin CV.
+        PDF, DOC o DOCX de hasta {maxMb} MB. Puedes terminar tu registro sin CV.
       </p>
       <div className="mt-3 rounded-xl border-2 border-dashed border-line p-4">
         <input

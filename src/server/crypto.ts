@@ -1,10 +1,10 @@
 import "server-only";
 import { createHash, createHmac, randomBytes, randomInt } from "node:crypto";
-import { env } from "./env";
+import { hashSecret } from "./env";
 
 /** HMAC con secreto del servidor: permite comparar teléfonos/correos/IP sin guardarlos en claro. */
 export function hmac(value: string): string {
-  return createHmac("sha256", env().HASH_SECRET).update(value).digest("hex");
+  return createHmac("sha256", hashSecret()).update(value).digest("hex");
 }
 
 export function sha256(value: string | Buffer): string {
